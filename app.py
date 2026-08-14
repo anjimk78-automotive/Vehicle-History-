@@ -331,12 +331,15 @@ elif phase == "✏️ Edit / Delete Records":
 
         vin_rows = df[df["VIN"] == search_vin].reset_index(drop=True)
         st.caption(f"{len(vin_rows)} record(s) on file for VIN **{search_vin}**.")
-        st.dataframe(vin_rows.drop(columns=["Timestamp", "Deleted"]), use_container_width=True, hide_index=True)
+
+        vin_rows_display = vin_rows.drop(columns=["Timestamp", "Deleted"]).copy()
+        vin_rows_display.insert(0, "#", range(1, len(vin_rows_display) + 1))
+        st.dataframe(vin_rows_display, use_container_width=True, hide_index=True)
 
         row_choice = st.selectbox(
-            "Select the record's Event Date to edit/delete",
+            "Select the record # to edit/delete (see # column above — same-day events can repeat, so pick by number, not date)",
             vin_rows.index,
-            format_func=lambda i: f"{vin_rows.loc[i, 'Event Date']} — {vin_rows.loc[i, 'Event Type']}",
+            format_func=lambda i: f"# {i + 1}",
         )
         selected = vin_rows.loc[row_choice]
 
