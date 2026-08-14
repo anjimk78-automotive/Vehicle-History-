@@ -412,25 +412,20 @@ elif phase == "📊 View / Search History":
     else:
         c1, c2, c3 = st.columns(3)
         with c1:
-            vin_filter = st.text_input("Filter by VIN contains")
+            vin_options_view = ["All"] + sorted([v for v in df["VIN"].unique().tolist() if v])
+            vin_filter = st.selectbox("Filter by VIN", vin_options_view)
         with c2:
             type_filter = st.multiselect("Filter by Event Type", EVENT_TYPES)
         with c3:
             status_filter = st.multiselect("Filter by Status", STATUSES)
 
         filtered = df.copy()
-        if vin_filter:
-            filtered = filtered[filtered["VIN"].str.contains(vin_filter, case=False, na=False)]
+        if vin_filter != "All":
+            filtered = filtered[filtered["VIN"] == vin_filter]
         if type_filter:
             filtered = filtered[filtered["Event Type"].isin(type_filter)]
         if status_filter:
             filtered = filtered[filtered["Status"].isin(status_filter)]
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Records", len(filtered))
-        m2.metric("Unique Vehicles", filtered["VIN"].nunique() if not filtered.empty else 0)
-        total_cost = pd.to_numeric(filtered["Cost"], errors="coerce").sum() if not filtered.empty else 0
-        m3.metric("Total Cost", f"{total_cost:,.2f}")
 
         display_cols = [c for c in COLUMN_ORDER if c not in ("Timestamp", "Deleted")]
         st.dataframe(filtered[display_cols], use_container_width=True, hide_index=True)
