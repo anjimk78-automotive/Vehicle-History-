@@ -126,28 +126,29 @@ def inject_login_style():
     .login-card {{
         position: relative;
         z-index: 1;
-        max-width: 420px;
+        max-width: 320px;
         margin: 6vh auto 0 auto;
         background: rgba(255, 255, 255, 0.94);
         border-radius: 1rem;
-        padding: 2rem 2rem 1.25rem 2rem;
+        padding: 1.5rem 1.5rem 1rem 1.5rem;
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
     .login-title {{
         text-align: center;
         font-weight: 700;
-        font-size: 1.4rem;
-        margin-bottom: 0.1rem;
+        font-size: 1.15rem;
+        margin-bottom: 1.1rem;
         color: #1d1d1d;
-    }}
-    .login-subtitle {{
-        text-align: center;
-        color: #555;
-        margin-bottom: 1.2rem;
     }}
     div[data-testid="stForm"] {{
         position: relative;
         z-index: 1;
+        max-width: 260px;
+        margin: 0 auto;
+        border: 1px solid #d6d6d6;
+        border-radius: 0.6rem;
+        padding: 1rem 1rem 0.6rem 1rem;
+        background: rgba(255, 255, 255, 0.6);
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -292,8 +293,7 @@ def to_number(value, as_int=False):
 def render_login():
     inject_login_style()
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">🚗 KMN Automotive</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-subtitle">Vehicle History Monitoring System</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System</div>', unsafe_allow_html=True)
 
     with st.form("login_form"):
         username = st.text_input("Username")
