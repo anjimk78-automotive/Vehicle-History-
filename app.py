@@ -167,7 +167,7 @@ def inject_login_style():
         overflow-y: auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
-        padding: 2rem 2.2rem 1.5rem 2.2rem;
+        padding: 1.1rem 2.2rem 0.9rem 2.2rem;
         background: rgba(255, 255, 255, 0.94);
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
