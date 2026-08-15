@@ -133,12 +133,18 @@ def inject_login_style():
     [data-testid="stAppViewContainer"] > .main {{
         padding-top: 0 !important;
     }}
+    /* Neutralize any transform on Streamlit's own wrapper elements — a
+       transform on an ancestor silently changes what position:fixed
+       centers against, which is what was throwing off centering. */
+    html, body, .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    .main, .block-container {{
+        transform: none !important;
+        filter: none !important;
+    }}
     .block-container {{
         padding-top: 2rem !important;
-        min-height: 100vh !important;
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
     }}
     .login-title {{
         text-align: center;
@@ -149,10 +155,16 @@ def inject_login_style():
         letter-spacing: 0.2px;
     }}
     div[data-testid="stForm"] {{
-        position: relative;
-        z-index: 1;
+        position: fixed !important;
+        top: 50vh !important;
+        left: 50vw !important;
+        transform: translate(-50%, -50%) !important;
+        margin: 0 !important;
+        z-index: 2;
+        width: 90%;
         max-width: 440px;
-        margin: 0 auto;
+        max-height: 90vh;
+        overflow-y: auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
         padding: 2rem 2.2rem 1.5rem 2.2rem;
@@ -166,6 +178,7 @@ def inject_login_style():
     }}
     div[data-testid="stForm"] .stTextInput input {{
         border: 2px solid #000000 !important;
+        border-radius: 0.75rem !important;
     }}
     div[data-testid="stForm"] .stTextInput,
     div[data-testid="stForm"] .stFormSubmitButton {{
