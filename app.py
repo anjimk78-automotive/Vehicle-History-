@@ -163,6 +163,8 @@ def inject_login_style():
         z-index: 2;
         width: 90%;
         max-width: 440px;
+        height: auto !important;
+        min-height: 0 !important;
         max-height: 90vh;
         overflow-y: auto;
         border: 1px solid #d6d6d6;
@@ -171,10 +173,15 @@ def inject_login_style():
         background: rgba(255, 255, 255, 0.94);
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
+    div[data-testid="stForm"] div {{
+        height: auto !important;
+        min-height: 0 !important;
+        flex-grow: 0 !important;
+    }}
     div[data-testid="stForm"] > div {{
-        display: flex;
-        flex-direction: column;
-        align-items: center;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
     }}
     div[data-testid="stForm"] .stTextInput input {{
         border: 2px solid #000000 !important;
@@ -328,7 +335,7 @@ def render_login():
     inject_login_style()
 
     with st.form("login_form"):
-        st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">🚗🔧 Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("🔐 Login", type="primary", use_container_width=True)
