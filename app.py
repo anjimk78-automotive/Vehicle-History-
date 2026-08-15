@@ -21,9 +21,10 @@ DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
 
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
+# NOTE: "User" added to record who entered the record (from the logged-in session).
 COLUMN_ORDER = [
     "Timestamp", "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)",
-    "Event Type", "Place", "Description of Goods / Service", "Cost",
+    "Event Type", "Place", "Description of Goods / Service", "Cost", "User",
 ]
 
 # Login credentials (only two users use this app)
@@ -252,7 +253,15 @@ def get_worksheet():
         ws.append_row(COLUMN_ORDER, value_input_option="USER_ENTERED")
     header = ws.row_values(1)
     if header != COLUMN_ORDER:
-        ws.update("A1", [COLUMN_ORDER])
+        # FIX: gspread's Worksheet.update() signature was swapped between
+        # major versions — old versions accept (range_name, values), newer
+        # 6.x versions accept (values, range_name). Calling it positionally
+        # as update("A1", [COLUMN_ORDER]) means that on a newer gspread
+        # install, "A1" gets treated as the *values* (and iterated
+        # character-by-character) while [COLUMN_ORDER] gets treated as the
+        # *range* — silently wiping/garbling the header row instead of
+        # writing it. Using explicit keyword args makes it version-proof.
+        ws.update(range_name="A1", values=[COLUMN_ORDER])
     return ws
 
 
@@ -515,6 +524,9 @@ if phase == "📋 Record Entering":
                         "Place": place.strip(),
                         "Description of Goods / Service": description.strip(),
                         "Cost": float(cost),
+                        # Who entered this record — pulled from the logged-in session,
+                        # not user-editable.
+                        "User": st.session_state["username"],
                     }
                     append_record(record)
                     st.success(f"✅ Saved entry for Vehicle No {vehicle_no}.")
