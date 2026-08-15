@@ -29,7 +29,7 @@ COLUMN_ORDER = [
 # Login credentials (only two users use this app)
 USERS = {
     "Narmada": "narmada123",
-    "Dilantha": "dilantha123",
+    "Dilantha": "dilantha",
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
@@ -149,7 +149,7 @@ def inject_login_style():
     .login-title {{
         text-align: center;
         font-weight: 800;
-        font-size: 0.95rem;
+        font-size: clamp(0.95rem, 3.4vw, 1.3rem);
         white-space: nowrap;
         margin-bottom: 0.7rem;
         color: #c1121f;
@@ -163,7 +163,7 @@ def inject_login_style():
         margin: 0 !important;
         z-index: 2;
         width: 90%;
-        max-width: 440px;
+        max-width: 640px;
         height: auto !important;
         min-height: 0 !important;
         max-height: 90vh;
