@@ -120,14 +120,21 @@ def inject_login_style():
         background: rgba(10, 15, 20, 0.55);
         z-index: 0;
     }}
-    [data-testid="stHeader"] {{
+    [data-testid="stHeader"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    #MainMenu,
+    header {{
         display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
     }}
     [data-testid="stAppViewContainer"] > .main {{
         padding-top: 0 !important;
     }}
     .block-container {{
-        padding-top: 4rem !important;
+        padding-top: 2rem !important;
     }}
     .login-card {{
         position: relative;
@@ -141,19 +148,20 @@ def inject_login_style():
     }}
     .login-title {{
         text-align: center;
-        font-weight: 700;
-        font-size: 1.15rem;
-        margin-bottom: 1.1rem;
-        color: #1d1d1d;
+        font-weight: 800;
+        font-size: 1.3rem;
+        margin-bottom: 1.2rem;
+        color: #c1121f;
+        letter-spacing: 0.2px;
     }}
     div[data-testid="stForm"] {{
         position: relative;
         z-index: 1;
-        max-width: 380px;
+        max-width: 440px;
         margin: 0 auto;
         border: 1px solid #d6d6d6;
-        border-radius: 0.6rem;
-        padding: 1.6rem 1.8rem 1.2rem 1.8rem;
+        border-radius: 0.8rem;
+        padding: 2rem 2.2rem 1.5rem 2.2rem;
         background: rgba(255, 255, 255, 0.6);
     }}
     </style>
@@ -301,7 +309,7 @@ def render_login():
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
     with st.form("login_form"):
-        st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">🚗🔧 Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("🔐 Login", type="primary", use_container_width=True)
