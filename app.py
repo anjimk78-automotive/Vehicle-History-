@@ -136,16 +136,6 @@ def inject_login_style():
     .block-container {{
         padding-top: 2rem !important;
     }}
-    .login-card {{
-        position: relative;
-        z-index: 1;
-        max-width: 320px;
-        margin: 6vh auto 0 auto;
-        background: rgba(255, 255, 255, 0.94);
-        border-radius: 1rem;
-        padding: 1.5rem 1.5rem 1rem 1.5rem;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-    }}
     .login-title {{
         text-align: center;
         font-weight: 800;
@@ -158,11 +148,21 @@ def inject_login_style():
         position: relative;
         z-index: 1;
         max-width: 440px;
-        margin: 0 auto;
+        margin: 6vh auto 0 auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
         padding: 2rem 2.2rem 1.5rem 2.2rem;
-        background: rgba(255, 255, 255, 0.6);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    }}
+    div[data-testid="stForm"] > div {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }}
+    div[data-testid="stForm"] .stTextInput,
+    div[data-testid="stForm"] .stFormSubmitButton {{
+        width: 100%;
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -306,7 +306,6 @@ def to_number(value, as_int=False):
 # =========================================================================
 def render_login():
     inject_login_style()
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
     with st.form("login_form"):
         st.markdown('<div class="login-title">🚗🔧 Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
@@ -320,8 +319,6 @@ def render_login():
                 st.rerun()
             else:
                 st.error("❌ Invalid username or password.")
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 if not st.session_state["authenticated"]:
