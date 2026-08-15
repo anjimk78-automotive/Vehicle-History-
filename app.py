@@ -135,6 +135,10 @@ def inject_login_style():
     }}
     .block-container {{
         padding-top: 2rem !important;
+        min-height: 100vh !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
     }}
     .login-title {{
         text-align: center;
@@ -148,7 +152,7 @@ def inject_login_style():
         position: relative;
         z-index: 1;
         max-width: 440px;
-        margin: 6vh auto 0 auto;
+        margin: 0 auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
         padding: 2rem 2.2rem 1.5rem 2.2rem;
@@ -159,6 +163,9 @@ def inject_login_style():
         display: flex;
         flex-direction: column;
         align-items: center;
+    }}
+    div[data-testid="stForm"] .stTextInput input {{
+        border: 2px solid #000000 !important;
     }}
     div[data-testid="stForm"] .stTextInput,
     div[data-testid="stForm"] .stFormSubmitButton {{
