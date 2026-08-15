@@ -581,6 +581,13 @@ elif phase == "📊 View":
         display_cols = [c for c in COLUMN_ORDER if c != "Timestamp"]
         st.dataframe(filtered[display_cols], use_container_width=True, hide_index=True)
 
+        total_amount = sum(to_number(c) for c in filtered["Cost"])
+        st.markdown(
+            f"<p style='text-align: right; font-weight: 700; font-size: 1.05rem;'>"
+            f"Total Amount: {total_amount:,.2f}</p>",
+            unsafe_allow_html=True,
+        )
+
         st.download_button(
             "⬇️ Download filtered results as CSV",
             filtered[display_cols].to_csv(index=False).encode("utf-8"),
