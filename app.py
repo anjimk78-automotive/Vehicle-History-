@@ -121,7 +121,13 @@ def inject_login_style():
         z-index: 0;
     }}
     [data-testid="stHeader"] {{
-        background: rgba(0,0,0,0) !important;
+        display: none !important;
+    }}
+    [data-testid="stAppViewContainer"] > .main {{
+        padding-top: 0 !important;
+    }}
+    .block-container {{
+        padding-top: 4rem !important;
     }}
     .login-card {{
         position: relative;
@@ -143,11 +149,11 @@ def inject_login_style():
     div[data-testid="stForm"] {{
         position: relative;
         z-index: 1;
-        max-width: 260px;
+        max-width: 380px;
         margin: 0 auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.6rem;
-        padding: 1rem 1rem 0.6rem 1rem;
+        padding: 1.6rem 1.8rem 1.2rem 1.8rem;
         background: rgba(255, 255, 255, 0.6);
     }}
     </style>
@@ -293,9 +299,9 @@ def to_number(value, as_int=False):
 def render_login():
     inject_login_style()
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System</div>', unsafe_allow_html=True)
 
     with st.form("login_form"):
+        st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System</div>', unsafe_allow_html=True)
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("🔐 Login", type="primary", use_container_width=True)
