@@ -328,7 +328,7 @@ def render_login():
     inject_login_style()
 
     with st.form("login_form"):
-        st.markdown('<div class="login-title">🚗🔧 Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">Welcome to Vehicle History Monitoring System 🔧🚗</div>', unsafe_allow_html=True)
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("🔐 Login", type="primary", use_container_width=True)
