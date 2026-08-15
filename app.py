@@ -150,7 +150,7 @@ def inject_login_style():
         text-align: center;
         font-weight: 800;
         font-size: 1.3rem;
-        margin-bottom: 1.2rem;
+        margin-bottom: 0.7rem;
         color: #c1121f;
         letter-spacing: 0.2px;
     }}
@@ -167,7 +167,7 @@ def inject_login_style():
         overflow-y: auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
-        padding: 1.1rem 2.2rem 0.9rem 2.2rem;
+        padding: 1.1rem 2.2rem 0.4rem 2.2rem;
         background: rgba(255, 255, 255, 0.94);
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
