@@ -29,7 +29,7 @@ COLUMN_ORDER = [
 
 # Login credentials (only two users use this app)
 USERS = {
-    "Narmada": "531531",
+    "Narmada": "narmada123",
     "Dilantha": "dilantha",
 }
 
@@ -484,17 +484,26 @@ if phase == "📋 Record Entering":
         vehicle_type = vehicle_map.get(vehicle_no, "")
         st.text_input("Vehicle Type", value=vehicle_type, disabled=True)
 
-        with st.form("add_entry_form", clear_on_submit=True):
+        # Only Description and Cost get reset after a save — Vehicle No,
+        # Date, Event Type, Mileage, and Place are meant to carry over into
+        # the next entry, so they're cleared here (before the widgets below
+        # are created) rather than via clear_on_submit, which would wipe
+        # everything.
+        if st.session_state.pop("_reset_desc_cost", False):
+            st.session_state["entry_description"] = ""
+            st.session_state["entry_cost"] = 0.0
+
+        with st.form("add_entry_form", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
-                event_date = st.date_input("Date *", value=date.today())
-                mileage = st.number_input("Mileage (KM) *", min_value=0, step=1)
+                event_date = st.date_input("Date *", value=date.today(), key="entry_date")
+                mileage = st.number_input("Mileage (KM) *", min_value=0, step=1, key="entry_mileage")
             with c2:
-                event_type = st.selectbox("Event Type", EVENT_TYPES)
-                cost = st.number_input("Cost *", min_value=0.0, step=0.01, format="%.2f")
+                event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
+                cost = st.number_input("Cost *", min_value=0.0, step=0.01, format="%.2f", key="entry_cost")
 
-            place = st.text_input("Place *")
-            description = st.text_area("Description of Goods / Service *")
+            place = st.text_input("Place *", key="entry_place")
+            description = st.text_area("Description of Goods / Service *", key="entry_description")
 
             submitted = st.form_submit_button("💾 Save Entry", type="primary", use_container_width=True)
             if submitted:
@@ -531,6 +540,7 @@ if phase == "📋 Record Entering":
                     append_record(record)
                     st.success(f"✅ Saved entry for Vehicle No {vehicle_no}.")
                     time.sleep(1)
+                    st.session_state["_reset_desc_cost"] = True
                     st.rerun()
 
 # =========================================================================
