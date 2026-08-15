@@ -29,7 +29,7 @@ COLUMN_ORDER = [
 # Login credentials (only two users use this app)
 USERS = {
     "Narmada": "narmada123",
-    "Dilantha": "dilantha",
+    "Dilantha": "dilantha123",
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
