@@ -174,7 +174,7 @@ def inject_login_style():
         overflow-y: auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
-        padding: 1.5rem 2.2rem 1rem 2.2rem;
+        padding: 1.5rem 2.2rem 0.8rem 2.2rem;
         background: rgba(255, 255, 255, 0.94);
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
@@ -262,38 +262,54 @@ def get_vehicle_worksheet():
     return sh.worksheet(_vehicle_worksheet_name())
 
 
-def bump_data_version():
-    st.session_state["_data_version"] = st.session_state.get("_data_version", 0) + 1
+def clear_data_caches():
+    """Invalidates both cached reads so the next load fetches fresh data
+    from the sheet — called after a write, and from the manual refresh
+    button on the View page."""
+    _load_data_cached.clear()
+    load_vehicle_map.clear()
 
 
-@st.cache_data(show_spinner=False)
-def _load_data_cached(data_version, sheet_id):
+@st.cache_data(show_spinner=False, ttl=20)
+def _load_data_cached(sheet_id):
     ws = get_worksheet()
-    records = ws.get_all_records()
-    df = pd.DataFrame(records)
-    for c in COLUMN_ORDER:
-        if c not in df.columns:
-            df[c] = ""
-    if len(df) > 0:
-        df = df[COLUMN_ORDER]
+    # get_all_values() reads the raw grid and never raises on duplicate or
+    # blank header cells the way get_all_records() does, so it's used here
+    # instead — the sheet's header row is already enforced to COLUMN_ORDER
+    # by get_worksheet(), so records are mapped back to it by position.
+    values = ws.get_all_values()
+    n = len(COLUMN_ORDER)
+    if len(values) <= 1:
+        return pd.DataFrame(columns=COLUMN_ORDER)
+    data_rows = values[1:]
+    padded_rows = [(row + [""] * n)[:n] for row in data_rows]
+    df = pd.DataFrame(padded_rows, columns=COLUMN_ORDER)
     df = df.astype(str).replace("nan", "")
     return df
 
 
 def load_data():
-    return _load_data_cached(st.session_state.get("_data_version", 0), _sheet_id())
+    try:
+        return _load_data_cached(_sheet_id())
+    except Exception as e:
+        st.error(f"❌ Could not read data from the Google Sheet.\n\n{e}")
+        return pd.DataFrame(columns=COLUMN_ORDER)
 
 
 def append_record(record: dict):
     ws = get_worksheet()
     row = [str(record.get(c, "")) for c in COLUMN_ORDER]
     ws.append_row(row, value_input_option="USER_ENTERED")
-    bump_data_version()
+    _load_data_cached.clear()
 
 
-def _find_column(headers, *candidates):
-    """Case/whitespace-insensitive match of a header name."""
-    norm = {str(h).strip().lower(): h for h in headers}
+def _find_column_index(headers, *candidates):
+    """Case/whitespace-insensitive match of a header name to its column index."""
+    norm = {}
+    for i, h in enumerate(headers):
+        key = str(h).strip().lower()
+        if key and key not in norm:  # keep the first occurrence of duplicates
+            norm[key] = i
     for cand in candidates:
         key = cand.strip().lower()
         if key in norm:
@@ -301,24 +317,26 @@ def _find_column(headers, *candidates):
     return None
 
 
-@st.cache_data(show_spinner=False, ttl=300)
-def load_vehicle_map(_version_key=0):
-    """Returns {vehicle_no: vehicle_type} sourced from Sheet2."""
+@st.cache_data(show_spinner=False, ttl=60)
+def load_vehicle_map():
+    """Returns {vehicle_no: vehicle_type} sourced from Sheet2. Uses raw grid
+    values (not get_all_records()) so duplicate or blank header cells in
+    that tab can't crash the app."""
     ws = get_vehicle_worksheet()
-    records = ws.get_all_records()
-    if not records:
+    values = ws.get_all_values()
+    if not values:
         return {}
-    headers = list(records[0].keys())
-    vno_col = _find_column(headers, "Vehicle No", "Vehicle No.", "VehicleNo", "Vehicle Number")
-    vtype_col = _find_column(headers, "Vehicle Type", "VehicleType", "Type")
-    if not vno_col:
+    header = values[0]
+    vno_idx = _find_column_index(header, "Vehicle No", "Vehicle No.", "VehicleNo", "Vehicle Number")
+    vtype_idx = _find_column_index(header, "Vehicle Type", "VehicleType", "Type")
+    if vno_idx is None:
         return {}
     mapping = {}
-    for r in records:
-        vno = str(r.get(vno_col, "")).strip()
+    for row in values[1:]:
+        vno = row[vno_idx].strip() if vno_idx < len(row) else ""
         if not vno:
             continue
-        vtype = str(r.get(vtype_col, "")).strip() if vtype_col else ""
+        vtype = row[vtype_idx].strip() if (vtype_idx is not None and vtype_idx < len(row)) else ""
         mapping[vno] = vtype
     return mapping
 
@@ -418,7 +436,7 @@ except Exception as e:
     st.stop()
 
 try:
-    vehicle_map = load_vehicle_map(st.session_state.get("_data_version", 0))
+    vehicle_map = load_vehicle_map()
 except Exception as e:
     vehicle_map = {}
     st.warning(
@@ -507,7 +525,13 @@ if phase == "📋 Record Entering":
 # PHASE 2 — VIEW
 # =========================================================================
 elif phase == "📊 View":
-    st.markdown("#### 📊 View Vehicle History")
+    h_l, h_r = st.columns([5, 1])
+    with h_l:
+        st.markdown("#### 📊 View Vehicle History")
+    with h_r:
+        if st.button("🔄 Refresh", use_container_width=True):
+            clear_data_caches()
+            st.rerun()
 
     df = load_data()
 
