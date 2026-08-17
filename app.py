@@ -536,7 +536,7 @@ if phase == "📋 Record Entering":
                 key=items_key,
                 column_config={
                     "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
-                    "Cost *": st.column_config.NumberColumn(min_value=0.0, step=0.01, format="%.2f"),
+                    "Cost *": st.column_config.NumberColumn(step=0.01, format="%.2f"),
                 },
             )
 
@@ -575,9 +575,11 @@ if phase == "📋 Record Entering":
                         cost_val = float(item.get("Cost *", 0.0) or 0.0)
                     except (TypeError, ValueError):
                         cost_val = 0.0
-                    if not desc and cost_val <= 0:
+                    # Cost can be negative (e.g. a discount line), so only an
+                    # exact 0 counts as "not filled in" here — not <= 0.
+                    if not desc and cost_val == 0:
                         continue
-                    if not desc or cost_val <= 0:
+                    if not desc or cost_val == 0:
                         incomplete_row = True
                         continue
                     valid_items.append((desc, cost_val))
