@@ -312,6 +312,16 @@ def append_record(record: dict):
     _load_data_cached.clear()
 
 
+def append_records(records: list):
+    """Batch version of append_record — used to save several Description/Cost
+    line items from the same entry (same Vehicle No, Date, Mileage, Place)
+    as separate sheet rows in a single API call."""
+    ws = get_worksheet()
+    rows = [[str(r.get(c, "")) for c in COLUMN_ORDER] for r in records]
+    ws.append_rows(rows, value_input_option="USER_ENTERED")
+    _load_data_cached.clear()
+
+
 def _find_column_index(headers, *candidates):
     """Case/whitespace-insensitive match of a header name to its column index."""
     norm = {}
@@ -495,14 +505,13 @@ if phase == "📋 Record Entering":
         vehicle_type = vehicle_map.get(vehicle_no, "")
         st.text_input("Vehicle Type", value=vehicle_type, disabled=True)
 
-        # Only Description and Cost get reset after a save — Vehicle No,
-        # Date, Event Type, Mileage, and Place are meant to carry over into
-        # the next entry, so they're cleared here (before the widgets below
-        # are created) rather than via clear_on_submit, which would wipe
+        # The Description/Cost table resets after a save — Vehicle No, Date,
+        # Event Type, Mileage, and Place are meant to carry over into the
+        # next entry, so only the table is cleared here (before it's
+        # created) rather than via clear_on_submit, which would wipe
         # everything.
-        if st.session_state.pop("_reset_desc_cost", False):
-            st.session_state["entry_description"] = ""
-            st.session_state["entry_cost"] = 0.0
+        if st.session_state.pop("_reset_items", False):
+            st.session_state.pop("entry_items", None)
 
         with st.form("add_entry_form", clear_on_submit=False):
             c1, c2 = st.columns(2)
@@ -511,10 +520,20 @@ if phase == "📋 Record Entering":
                 mileage = st.number_input("Mileage (KM) *", min_value=0, step=1, key="entry_mileage")
             with c2:
                 event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
-                cost = st.number_input("Cost *", min_value=0.0, step=0.01, format="%.2f", key="entry_cost")
+                place = st.text_input("Place *", key="entry_place")
 
-            place = st.text_input("Place *", key="entry_place")
-            description = st.text_area("Description of Goods / Service *", key="entry_description")
+            st.markdown("**Description of Goods / Service \\* and Cost \\***")
+            items_df = st.data_editor(
+                pd.DataFrame({"Description of Goods / Service *": [""], "Cost *": [0.0]}),
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                key="entry_items",
+                column_config={
+                    "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
+                    "Cost *": st.column_config.NumberColumn(min_value=0.0, step=0.01, format="%.2f"),
+                },
+            )
 
             submitted = st.form_submit_button("💾 Save Entry", type="primary", use_container_width=True)
             if submitted:
@@ -523,35 +542,59 @@ if phase == "📋 Record Entering":
                     errors.append("Vehicle No is required.")
                 if not place.strip():
                     errors.append("Place is required.")
-                if not description.strip():
-                    errors.append("Description of Goods / Service is required.")
                 if mileage <= 0:
                     errors.append("Mileage (KM) is required.")
-                if cost <= 0:
-                    errors.append("Cost is required.")
+
+                # Rows where both cells are blank are just unused table
+                # rows (e.g. the default empty row) and are skipped
+                # silently. A row with only one of the two filled is
+                # incomplete and flagged.
+                valid_items = []
+                incomplete_row = False
+                for _, item in items_df.iterrows():
+                    desc = str(item.get("Description of Goods / Service *", "") or "").strip()
+                    try:
+                        cost_val = float(item.get("Cost *", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        cost_val = 0.0
+                    if not desc and cost_val <= 0:
+                        continue
+                    if not desc or cost_val <= 0:
+                        incomplete_row = True
+                        continue
+                    valid_items.append((desc, cost_val))
+
+                if incomplete_row:
+                    errors.append("Each row needs both a Description of Goods / Service and a Cost.")
+                if not valid_items:
+                    errors.append("Add at least one Description of Goods / Service and Cost entry.")
 
                 if errors:
                     for err in errors:
                         st.error(f"❌ {err}")
                 else:
-                    record = {
-                        "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-                        "Vehicle No": vehicle_no,
-                        "Vehicle Type": vehicle_type,
-                        "Date": event_date.isoformat(),
-                        "Mileage (KM)": int(mileage),
-                        "Event Type": event_type,
-                        "Place": place.strip(),
-                        "Description of Goods / Service": description.strip(),
-                        "Cost": float(cost),
-                        # Who entered this record — pulled from the logged-in session,
-                        # not user-editable.
-                        "User": st.session_state["username"],
-                    }
-                    append_record(record)
-                    st.success(f"✅ Saved entry for Vehicle No {vehicle_no}.")
+                    records = [
+                        {
+                            "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+                            "Vehicle No": vehicle_no,
+                            "Vehicle Type": vehicle_type,
+                            "Date": event_date.isoformat(),
+                            "Mileage (KM)": int(mileage),
+                            "Event Type": event_type,
+                            "Place": place.strip(),
+                            "Description of Goods / Service": desc,
+                            "Cost": cost_val,
+                            # Who entered this record — pulled from the logged-in
+                            # session, not user-editable.
+                            "User": st.session_state["username"],
+                        }
+                        for desc, cost_val in valid_items
+                    ]
+                    append_records(records)
+                    entry_word = "entry" if len(records) == 1 else "entries"
+                    st.success(f"✅ Saved {len(records)} {entry_word} for Vehicle No {vehicle_no}.")
                     time.sleep(1)
-                    st.session_state["_reset_desc_cost"] = True
+                    st.session_state["_reset_items"] = True
                     st.rerun()
 
 # =========================================================================
