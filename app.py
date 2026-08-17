@@ -29,7 +29,7 @@ COLUMN_ORDER = [
 
 # Login credentials (only two users use this app)
 USERS = {
-    "Narmada": "narmada123",
+    "Narmada": "1996",
     "Dilantha": "dilantha",
 }
 
