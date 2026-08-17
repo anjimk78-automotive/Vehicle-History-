@@ -35,7 +35,7 @@ USERS = {
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
-LOGIN_BG_IMAGE_URL = "https://www.autoremarketing.com/ar/retail/dealer-news-genesis-stands-alone-at-9-new-stores-acquisitions-in-colorado-ohio-texas/"
+LOGIN_BG_IMAGE_URL = "https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=1950&q=80"
 
 # =========================================================================
 # SESSION STATE INIT
