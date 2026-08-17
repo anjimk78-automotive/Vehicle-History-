@@ -34,7 +34,7 @@ USERS = {
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
-LOGIN_BG_IMAGE_URL = "https://images.unsplash.com/photo-1486754735734-325b5831c3ad?auto=format&fit=crop&w=1950&q=80"
+LOGIN_BG_IMAGE_URL = "https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=1950&q=80"
 
 # =========================================================================
 # SESSION STATE INIT
@@ -175,7 +175,7 @@ def inject_login_style():
         overflow-y: auto;
         border: 1px solid #d6d6d6;
         border-radius: 0.8rem;
-        padding: 1.5rem 2.2rem 0.8rem 2.2rem;
+        padding: 1.9rem 2.2rem 1.3rem 2.2rem;
         background: rgba(255, 255, 255, 0.94);
         box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     }}
@@ -253,10 +253,10 @@ def get_worksheet():
         ws.append_row(COLUMN_ORDER, value_input_option="USER_ENTERED")
     header = ws.row_values(1)
     if header != COLUMN_ORDER:
-        # FIX: gspread's Worksheet.update() signature was swapped between
-        # major versions — old versions accept (range_name, values), newer
-        # 6.x versions accept (values, range_name). Calling it positionally
-        # as update("A1", [COLUMN_ORDER]) means that on a newer gspread
+        # gspread's Worksheet.update() signature was swapped between major
+        # versions — old versions accept (range_name, values), newer 6.x
+        # versions accept (values, range_name). Calling it positionally as
+        # update("A1", [COLUMN_ORDER]) means that on a newer gspread
         # install, "A1" gets treated as the *values* (and iterated
         # character-by-character) while [COLUMN_ORDER] gets treated as the
         # *range* — silently wiping/garbling the header row instead of
@@ -272,11 +272,11 @@ def get_vehicle_worksheet():
 
 
 def clear_data_caches():
-    """Invalidates both cached reads so the next load fetches fresh data
+    """Invalidates all cached reads so the next load fetches fresh data
     from the sheet — called after a write, and from the manual refresh
     button on the View page."""
     _load_data_cached.clear()
-    load_vehicle_map.clear()
+    load_vehicle_details.clear()
 
 
 @st.cache_data(show_spinner=False, ttl=20)
@@ -327,10 +327,10 @@ def _find_column_index(headers, *candidates):
 
 
 @st.cache_data(show_spinner=False, ttl=60)
-def load_vehicle_map():
-    """Returns {vehicle_no: vehicle_type} sourced from Sheet2. Uses raw grid
-    values (not get_all_records()) so duplicate or blank header cells in
-    that tab can't crash the app."""
+def load_vehicle_details():
+    """Returns {vehicle_no: {"Vehicle Type": ..., "Rider": ..., "Brand": ...}}
+    sourced from Sheet2. Uses raw grid values (not get_all_records()) so
+    duplicate or blank header cells in that tab can't crash the app."""
     ws = get_vehicle_worksheet()
     values = ws.get_all_values()
     if not values:
@@ -338,16 +338,25 @@ def load_vehicle_map():
     header = values[0]
     vno_idx = _find_column_index(header, "Vehicle No", "Vehicle No.", "VehicleNo", "Vehicle Number")
     vtype_idx = _find_column_index(header, "Vehicle Type", "VehicleType", "Type")
+    rider_idx = _find_column_index(header, "Rider", "Rider Name", "Driver", "Driver Name")
+    brand_idx = _find_column_index(header, "Brand", "Vehicle Brand", "Make")
     if vno_idx is None:
         return {}
-    mapping = {}
+
+    def _cell(row, idx):
+        return row[idx].strip() if (idx is not None and idx < len(row)) else ""
+
+    details = {}
     for row in values[1:]:
-        vno = row[vno_idx].strip() if vno_idx < len(row) else ""
+        vno = _cell(row, vno_idx)
         if not vno:
             continue
-        vtype = row[vtype_idx].strip() if (vtype_idx is not None and vtype_idx < len(row)) else ""
-        mapping[vno] = vtype
-    return mapping
+        details[vno] = {
+            "Vehicle Type": _cell(row, vtype_idx),
+            "Rider": _cell(row, rider_idx),
+            "Brand": _cell(row, brand_idx),
+        }
+    return details
 
 
 def to_number(value, as_int=False):
@@ -415,7 +424,7 @@ if not _gsheet_configured():
             "3. Open the target Google Sheet and share it (Editor access) with the "
             "service account's `client_email` address.\n"
             "4. Make sure the Sheet has a tab named **Sheet2** with columns "
-            "**Vehicle No** and **Vehicle Type** listing every vehicle.\n"
+            "**Vehicle No**, **Vehicle Type**, **Rider**, and **Brand** listing every vehicle.\n"
             "5. Add the following to your app's Streamlit secrets:\n"
         )
         st.code(
@@ -445,20 +454,22 @@ except Exception as e:
     st.stop()
 
 try:
-    vehicle_map = load_vehicle_map()
+    vehicle_details = load_vehicle_details()
 except Exception as e:
-    vehicle_map = {}
+    vehicle_details = {}
     st.warning(
         f"⚠️ Could not read the vehicle list from **{_vehicle_worksheet_name()}**. "
         f"Make sure that tab exists with a 'Vehicle No' column.\n\n{e}"
     )
 
+vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_details.items()}
+
 # =========================================================================
-# PHASE SELECTOR — only two sections
+# PHASE SELECTOR
 # =========================================================================
 phase = st.radio(
     "Phase",
-    ["📋 Record Entering", "📊 View"],
+    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -588,12 +599,44 @@ elif phase == "📊 View":
             unsafe_allow_html=True,
         )
 
+        # Build the export with a trailing Total row, and encode with a
+        # UTF-8 BOM (utf-8-sig) — plain "utf-8" is what was making Sinhala
+        # (and any other non-Latin) text show up as garbled characters when
+        # opened in Excel, since Excel doesn't reliably auto-detect UTF-8
+        # without the BOM.
+        export_df = filtered[display_cols].copy()
+        total_row = {col: "" for col in display_cols}
+        total_row[display_cols[0]] = "Total"
+        total_row["Cost"] = f"{total_amount:,.2f}"
+        export_df = pd.concat([export_df, pd.DataFrame([total_row])], ignore_index=True)
+
         st.download_button(
             "⬇️ Download filtered results as CSV",
-            filtered[display_cols].to_csv(index=False).encode("utf-8"),
+            export_df.to_csv(index=False).encode("utf-8-sig"),
             file_name="vehicle_history_export.csv",
             mime="text/csv",
         )
+
+# =========================================================================
+# PHASE 3 — VEHICLE DETAILS
+# =========================================================================
+elif phase == "🚙 Vehicle Details":
+    st.markdown("#### 🚙 Vehicle Details")
+
+    detail_options = sorted(vehicle_details.keys())
+
+    if not detail_options:
+        st.info(
+            f"No vehicles found in the **{_vehicle_worksheet_name()}** tab yet. "
+            "Add vehicles there (with a 'Vehicle No' column) first."
+        )
+    else:
+        selected_vno = st.selectbox("Vehicle No", detail_options, key="details_vehicle_no")
+        info = vehicle_details.get(selected_vno, {})
+
+        st.text_input("Vehicle Type", value=info.get("Vehicle Type", ""), disabled=True)
+        st.text_input("Rider", value=info.get("Rider", ""), disabled=True)
+        st.text_input("Brand", value=info.get("Brand", ""), disabled=True)
 
 st.markdown("---")
 st.markdown(
