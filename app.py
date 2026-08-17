@@ -505,19 +505,24 @@ if phase == "📋 Record Entering":
         vehicle_type = vehicle_map.get(vehicle_no, "")
         st.text_input("Vehicle Type", value=vehicle_type, disabled=True)
 
-        # The Description/Cost table resets after a save — Vehicle No, Date,
+        # The Description/Cost table resets after a save. Vehicle No, Date,
         # Event Type, Mileage, and Place are meant to carry over into the
-        # next entry, so only the table is cleared here (before it's
-        # created) rather than via clear_on_submit, which would wipe
-        # everything.
-        if st.session_state.pop("_reset_items", False):
-            st.session_state.pop("entry_items", None)
+        # next entry, so only the table is cleared here — and it's cleared
+        # by rendering it under a brand-new widget key each time (rather
+        # than reusing "entry_items"), since a data editor's internal
+        # add/edit tracking can otherwise survive a plain session_state pop.
+        if "_items_key_version" not in st.session_state:
+            st.session_state["_items_key_version"] = 0
+        items_key = f"entry_items_{st.session_state['_items_key_version']}"
 
         with st.form("add_entry_form", clear_on_submit=False):
             c1, c2 = st.columns(2)
             with c1:
                 event_date = st.date_input("Date *", value=date.today(), key="entry_date")
-                mileage = st.number_input("Mileage (KM) *", min_value=0, step=1, key="entry_mileage")
+                mileage = st.text_input(
+                    "Mileage (KM) *", key="entry_mileage",
+                    placeholder="e.g. 15000 or NA",
+                )
             with c2:
                 event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
                 place = st.text_input("Place *", key="entry_place")
@@ -528,7 +533,7 @@ if phase == "📋 Record Entering":
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
-                key="entry_items",
+                key=items_key,
                 column_config={
                     "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
                     "Cost *": st.column_config.NumberColumn(min_value=0.0, step=0.01, format="%.2f"),
@@ -542,8 +547,21 @@ if phase == "📋 Record Entering":
                     errors.append("Vehicle No is required.")
                 if not place.strip():
                     errors.append("Place is required.")
-                if mileage <= 0:
+                mileage_str = mileage.strip()
+                mileage_value = ""
+                if not mileage_str:
                     errors.append("Mileage (KM) is required.")
+                elif mileage_str.upper() == "NA":
+                    mileage_value = "NA"
+                else:
+                    try:
+                        as_float = float(mileage_str)
+                        if as_float < 0:
+                            errors.append("Mileage (KM) must be a positive number or 'NA'.")
+                        else:
+                            mileage_value = int(as_float) if as_float == int(as_float) else as_float
+                    except ValueError:
+                        errors.append("Mileage (KM) must be a number or 'NA'.")
 
                 # Rows where both cells are blank are just unused table
                 # rows (e.g. the default empty row) and are skipped
@@ -579,7 +597,7 @@ if phase == "📋 Record Entering":
                             "Vehicle No": vehicle_no,
                             "Vehicle Type": vehicle_type,
                             "Date": event_date.isoformat(),
-                            "Mileage (KM)": int(mileage),
+                            "Mileage (KM)": mileage_value,
                             "Event Type": event_type,
                             "Place": place.strip(),
                             "Description of Goods / Service": desc,
@@ -594,7 +612,7 @@ if phase == "📋 Record Entering":
                     entry_word = "entry" if len(records) == 1 else "entries"
                     st.success(f"✅ Saved {len(records)} {entry_word} for Vehicle No {vehicle_no}.")
                     time.sleep(1)
-                    st.session_state["_reset_items"] = True
+                    st.session_state["_items_key_version"] += 1
                     st.rerun()
 
 # =========================================================================
@@ -633,7 +651,24 @@ elif phase == "📊 View":
             filtered = filtered[filtered["Place"].isin(place_filter)]
 
         display_cols = [c for c in COLUMN_ORDER if c != "Timestamp"]
-        st.dataframe(filtered[display_cols], use_container_width=True, hide_index=True)
+
+        # "Total Amount" column: for rows that share the same Vehicle No,
+        # Date, and Place (i.e. the same visit), the summed Cost is shown
+        # only on the last row of that group — acting as a per-visit
+        # subtotal — and left blank on the other rows in the group.
+        group_cols = ["Vehicle No", "Date", "Place"]
+        table_df = filtered[display_cols].copy()
+        cost_numeric = filtered["Cost"].apply(to_number)
+        group_totals = cost_numeric.groupby(
+            [filtered[c] for c in group_cols]
+        ).transform("sum")
+        is_last_in_group = ~filtered.duplicated(subset=group_cols, keep="last")
+        table_df["Total Amount"] = ""
+        table_df.loc[is_last_in_group, "Total Amount"] = group_totals[is_last_in_group].map(
+            lambda x: f"{x:,.2f}"
+        )
+
+        st.dataframe(table_df, use_container_width=True, hide_index=True)
 
         total_amount = sum(to_number(c) for c in filtered["Cost"])
         st.markdown(
@@ -646,10 +681,12 @@ elif phase == "📊 View":
         # UTF-8 BOM (utf-8-sig) — plain "utf-8" is what was making Sinhala
         # (and any other non-Latin) text show up as garbled characters when
         # opened in Excel, since Excel doesn't reliably auto-detect UTF-8
-        # without the BOM.
-        export_df = filtered[display_cols].copy()
-        total_row = {col: "" for col in display_cols}
-        total_row[display_cols[0]] = "Total"
+        # without the BOM. "User" is left out of the download on purpose —
+        # it stays visible in the on-screen table above, just not exported.
+        export_cols = [c for c in display_cols if c != "User"] + ["Total Amount"]
+        export_df = table_df[export_cols].copy()
+        total_row = {col: "" for col in export_cols}
+        total_row[export_cols[0]] = "Total"
         total_row["Cost"] = f"{total_amount:,.2f}"
         export_df = pd.concat([export_df, pd.DataFrame([total_row])], ignore_index=True)
 
