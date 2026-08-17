@@ -35,7 +35,7 @@ USERS = {
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
-LOGIN_BG_IMAGE_URL = "Genesis-of-Wolfchase.jpg"
+LOGIN_BG_IMAGE_URL = "https://github.com/anjimk78-automotive/Vehicle-History-/blob/main/Genesis-of-Wolfchase.jpg"
 
 # =========================================================================
 # SESSION STATE INIT
