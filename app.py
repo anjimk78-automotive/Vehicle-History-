@@ -278,7 +278,6 @@ def clear_data_caches():
     button on the View page."""
     _load_data_cached.clear()
     load_vehicle_details.clear()
-    load_vehicle_all_columns.clear()
 
 
 @st.cache_data(show_spinner=False, ttl=20)
@@ -395,34 +394,6 @@ def known_places():
         return sorted({p for p in load_data()["Place"].tolist() if p})
     except Exception:
         return []
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def load_vehicle_all_columns():
-    """Returns ({vehicle_no: {header: value, ...}}, [headers]) covering
-    every column present in Sheet2 (not just Vehicle Type/Rider/Brand) —
-    used by the Vehicle Details page so it shows whatever columns that
-    sheet actually has, including ones added later."""
-    ws = get_vehicle_worksheet()
-    values = ws.get_all_values()
-    if not values:
-        return {}, []
-    header = values[0]
-    vno_idx = _find_column_index(header, "Vehicle No", "Vehicle No.", "VehicleNo", "Vehicle Number")
-    if vno_idx is None:
-        return {}, []
-
-    def _cell(row, idx):
-        return row[idx].strip() if idx < len(row) else ""
-
-    headers = [h for i, h in enumerate(header) if str(h).strip() and i != vno_idx]
-    details = {}
-    for row in values[1:]:
-        vno = _cell(row, vno_idx)
-        if not vno:
-            continue
-        details[vno] = {h: _cell(row, i) for i, h in enumerate(header) if str(h).strip()}
-    return details, headers
 
 
 # =========================================================================
@@ -771,22 +742,11 @@ elif phase == "🚙 Vehicle Details":
         )
     else:
         selected_vno = st.selectbox("Vehicle No", detail_options, key="details_vehicle_no")
+        info = vehicle_details.get(selected_vno, {})
 
-        try:
-            all_details, detail_headers = load_vehicle_all_columns()
-        except Exception as e:
-            all_details, detail_headers = {}, []
-            st.warning(
-                f"⚠️ Could not read the full vehicle details from "
-                f"**{_vehicle_worksheet_name()}**.\n\n{e}"
-            )
-
-        info = all_details.get(selected_vno, {})
-        if not detail_headers:
-            st.info("No additional columns found for this vehicle.")
-        else:
-            for i, col_name in enumerate(detail_headers):
-                st.text_input(col_name, value=info.get(col_name, ""), disabled=True, key=f"detail_field_{i}")
+        st.text_input("Vehicle Type", value=info.get("Vehicle Type", ""), disabled=True)
+        st.text_input("Rider", value=info.get("Rider", ""), disabled=True)
+        st.text_input("Brand", value=info.get("Brand", ""), disabled=True)
 
 st.markdown("---")
 st.markdown(
