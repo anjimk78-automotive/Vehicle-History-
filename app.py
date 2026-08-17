@@ -1,3 +1,4 @@
+import inspect
 import time
 from datetime import date
 
@@ -379,6 +380,22 @@ def to_number(value, as_int=False):
         return 0 if as_int else 0.0
 
 
+# Newer Streamlit versions let st.selectbox suggest existing options while
+# still accepting freshly typed text (a combobox). Checked once at import
+# time so the Place field can use it when available and fall back to a
+# plain text box on older Streamlit installs, instead of ever crashing.
+_SELECTBOX_SUPPORTS_NEW_OPTIONS = "accept_new_options" in inspect.signature(st.selectbox).parameters
+
+
+def known_places():
+    """Distinct, non-blank Place values seen in past records, for the
+    Place field's autocomplete suggestions."""
+    try:
+        return sorted({p for p in load_data()["Place"].tolist() if p})
+    except Exception:
+        return []
+
+
 # =========================================================================
 # LOGIN GATE
 # =========================================================================
@@ -525,7 +542,18 @@ if phase == "📋 Record Entering":
                 )
             with c2:
                 event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
-                place = st.text_input("Place *", key="entry_place")
+                if _SELECTBOX_SUPPORTS_NEW_OPTIONS:
+                    place = st.selectbox(
+                        "Place *",
+                        options=known_places(),
+                        index=None,
+                        placeholder="Start typing a place...",
+                        accept_new_options=True,
+                        key="entry_place",
+                    )
+                    place = place or ""
+                else:
+                    place = st.text_input("Place *", key="entry_place")
 
             st.markdown("**Description of Goods / Service \\* and Cost \\***")
             items_df = st.data_editor(
