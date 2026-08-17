@@ -35,7 +35,7 @@ USERS = {
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
-LOGIN_BG_IMAGE_URL = "https://stock.adobe.com/search?k=car+dealer+showroom"
+LOGIN_BG_IMAGE_URL = "https://www.autoremarketing.com/ar/retail/dealer-news-genesis-stands-alone-at-9-new-stores-acquisitions-in-colorado-ohio-texas/"
 
 # =========================================================================
 # SESSION STATE INIT
