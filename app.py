@@ -794,6 +794,28 @@ elif phase == "🚙 Vehicle Details":
             for i, col_name in enumerate(detail_headers):
                 st.text_input(col_name, value=info.get(col_name, ""), disabled=True, key=f"detail_field_{i}")
 
+        # Service/repair history for this specific vehicle, pulled from the
+        # same VehicleHistory data as the View page — previously this page
+        # only ever showed the static Sheet2 fields above and never
+        # surfaced the vehicle's actual recorded history.
+        st.markdown("---")
+        st.markdown(f"**📜 Service History — {selected_vno}**")
+
+        history_df = load_data()
+        vehicle_history = history_df[history_df["Vehicle No"] == selected_vno]
+
+        if vehicle_history.empty:
+            st.info("No service history recorded for this vehicle yet.")
+        else:
+            history_display_cols = [c for c in COLUMN_ORDER if c not in ("Timestamp", "Vehicle No")]
+            st.dataframe(vehicle_history[history_display_cols], use_container_width=True, hide_index=True)
+
+            vehicle_total = sum(to_number(c) for c in vehicle_history["Cost"])
+            st.markdown(
+                f"<p style='text-align: right; font-weight: 700; font-size: 1.05rem;'>"
+                f"Total Amount: {vehicle_total:,.2f}</p>",
+                unsafe_allow_html=True,
+            )
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray;'>KMN Automotive - Vehicle History Monitoring System</p>",
