@@ -456,8 +456,8 @@ inject_base_style()
 
 top_l, top_r = st.columns([5, 1])
 with top_l:
-    st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System</h1>", unsafe_allow_html=True)
-    st.subheader("KMN Automotive")
+    st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
+    #st.subheader("KMN Automotive")
 with top_r:
     st.write("")
     st.write(f"👤 {st.session_state['username']}")
@@ -801,7 +801,7 @@ elif phase == "🚙 Vehicle Details":
         # only ever showed the static Sheet2 fields above and never
         # surfaced the vehicle's actual recorded history.
         st.markdown("---")
-        st.markdown(f"**📜 Service History — {selected_vno}**")
+        st.markdown(f"**📜 Vehicle History — {selected_vno}**")
 
         history_df = load_data()
         vehicle_history = history_df[history_df["Vehicle No"] == selected_vno]
@@ -820,6 +820,6 @@ elif phase == "🚙 Vehicle Details":
             )
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; color: gray;'>KMN Automotive - Vehicle History Monitoring System</p>",
+    "<p style='text-align: center; color: gray;'>Vehicle History Monitoring System</p>",
     unsafe_allow_html=True,
 )
