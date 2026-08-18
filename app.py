@@ -791,8 +791,10 @@ elif phase == "🚙 Vehicle Details":
         if not detail_headers:
             st.info("No additional columns found for this vehicle.")
         else:
-            for i, col_name in enumerate(detail_headers):
-                st.text_input(col_name, value=info.get(col_name, ""), disabled=True, key=f"detail_field_{i}")
+            details_table = pd.DataFrame(
+                {"Field": detail_headers, "Value": [info.get(col_name, "") for col_name in detail_headers]}
+            )
+            st.dataframe(details_table, use_container_width=True, hide_index=True)
 
         # Service/repair history for this specific vehicle, pulled from the
         # same VehicleHistory data as the View page — previously this page
