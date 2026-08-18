@@ -1,11 +1,9 @@
 import inspect
-import re
 import time
 from datetime import date
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -397,27 +395,6 @@ def known_places():
         return sorted({p for p in load_data()["Place"].tolist() if p})
     except Exception:
         return []
-
-
-# Column names (Sheet2) that hold a 3D model — either a bare embed URL or
-# a full pasted embed snippet (e.g. Sketchfab's iframe block). Checked
-# case-insensitively against Sheet2's headers.
-_3D_MODEL_COLUMN_NAMES = {"3d model", "3d", "model 3d", "sketchfab", "3d view", "3d model url"}
-
-
-def extract_embed_src(value):
-    """Pulls the iframe src URL out of either a bare link or a full pasted
-    embed snippet (like Sketchfab's <iframe ...> block), so the 3D Model
-    column can hold whichever the user finds easier to paste into Sheet2."""
-    value = str(value).strip()
-    if not value:
-        return None
-    match = re.search(r'src=["\']([^"\']+)["\']', value)
-    if match:
-        return match.group(1)
-    if value.startswith("http"):
-        return value
-    return None
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -814,35 +791,17 @@ elif phase == "🚙 Vehicle Details":
         if not detail_headers:
             st.info("No additional columns found for this vehicle.")
         else:
-            # The 3D Model column (if present) is rendered as an actual
-            # embedded viewer below instead of as a row of raw embed HTML
-            # in the plain table.
-            model_col = next(
-                (h for h in detail_headers if h.strip().lower() in _3D_MODEL_COLUMN_NAMES),
-                None,
+            details_table = pd.DataFrame(
+                {"Field": detail_headers, "Value": [info.get(col_name, "") for col_name in detail_headers]}
             )
-            table_headers = [h for h in detail_headers if h != model_col]
-
-            if table_headers:
-                details_table = pd.DataFrame(
-                    {"Field": table_headers, "Value": [info.get(col_name, "") for col_name in table_headers]}
-                )
-                st.dataframe(details_table, use_container_width=True, hide_index=True)
-
-            if model_col:
-                embed_src = extract_embed_src(info.get(model_col, ""))
-                if embed_src:
-                    st.markdown("**🧊 3D Model**")
-                    components.iframe(embed_src, height=480, scrolling=True)
-                elif info.get(model_col, "").strip():
-                    st.caption(f"3D Model: {info.get(model_col, '')}")
+            st.dataframe(details_table, use_container_width=True, hide_index=True)
 
         # Service/repair history for this specific vehicle, pulled from the
         # same VehicleHistory data as the View page — previously this page
         # only ever showed the static Sheet2 fields above and never
         # surfaced the vehicle's actual recorded history.
         st.markdown("---")
-        st.markdown(f"**📜 Service History — {selected_vno}**")
+        st.markdown(f"**📜 Vehicle History — {selected_vno}**")
 
         history_df = load_data()
         vehicle_history = history_df[history_df["Vehicle No"] == selected_vno]
