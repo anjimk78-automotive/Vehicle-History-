@@ -1,9 +1,11 @@
 import inspect
+import re
 import time
 from datetime import date
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -397,6 +399,27 @@ def known_places():
         return []
 
 
+# Column names (Sheet2) that hold a 3D model — either a bare embed URL or
+# a full pasted embed snippet (e.g. Sketchfab's iframe block). Checked
+# case-insensitively against Sheet2's headers.
+_3D_MODEL_COLUMN_NAMES = {"3d model", "3d", "model 3d", "sketchfab", "3d view", "3d model url"}
+
+
+def extract_embed_src(value):
+    """Pulls the iframe src URL out of either a bare link or a full pasted
+    embed snippet (like Sketchfab's <iframe ...> block), so the 3D Model
+    column can hold whichever the user finds easier to paste into Sheet2."""
+    value = str(value).strip()
+    if not value:
+        return None
+    match = re.search(r'src=["\']([^"\']+)["\']', value)
+    if match:
+        return match.group(1)
+    if value.startswith("http"):
+        return value
+    return None
+
+
 @st.cache_data(show_spinner=False, ttl=60)
 def load_vehicle_all_columns():
     """Returns ({vehicle_no: {header: value, ...}}, [headers]) covering
@@ -620,10 +643,12 @@ if phase == "📋 Record Entering":
                     except ValueError:
                         errors.append("Mileage (KM) must be a number or 'NA'.")
 
-                # Rows where both cells are blank are just unused table
+                # Rows where both cells are blank/zero are just unused table
                 # rows (e.g. the default empty row) and are skipped
-                # silently. A row with only one of the two filled is
-                # incomplete and flagged.
+                # silently. A row with a Description is valid regardless of
+                # its Cost — 0 is a legitimate cost (e.g. a free item), not
+                # treated as "not filled in". A row with a Cost but no
+                # Description is flagged as incomplete.
                 valid_items = []
                 incomplete_row = False
                 for _, item in items_df.iterrows():
@@ -632,17 +657,16 @@ if phase == "📋 Record Entering":
                         cost_val = float(item.get("Cost *", 0.0) or 0.0)
                     except (TypeError, ValueError):
                         cost_val = 0.0
-                    # Cost can be negative (e.g. a discount line), so only an
-                    # exact 0 counts as "not filled in" here — not <= 0.
+
                     if not desc and cost_val == 0:
                         continue
-                    if not desc or cost_val == 0:
+                    if not desc:
                         incomplete_row = True
                         continue
                     valid_items.append((desc, cost_val))
 
                 if incomplete_row:
-                    errors.append("Each row needs both a Description of Goods / Service and a Cost.")
+                    errors.append("Each row with a Cost needs a Description of Goods / Service too.")
                 if not valid_items:
                     errors.append("Add at least one Description of Goods / Service and Cost entry.")
 
@@ -791,17 +815,35 @@ elif phase == "🚙 Vehicle Details":
         if not detail_headers:
             st.info("No additional columns found for this vehicle.")
         else:
-            details_table = pd.DataFrame(
-                {"Field": detail_headers, "Value": [info.get(col_name, "") for col_name in detail_headers]}
+            # The 3D Model column (if present) is rendered as an actual
+            # embedded viewer below instead of as a row of raw embed HTML
+            # in the plain table.
+            model_col = next(
+                (h for h in detail_headers if h.strip().lower() in _3D_MODEL_COLUMN_NAMES),
+                None,
             )
-            st.dataframe(details_table, use_container_width=True, hide_index=True)
+            table_headers = [h for h in detail_headers if h != model_col]
+
+            if table_headers:
+                details_table = pd.DataFrame(
+                    {"Field": table_headers, "Value": [info.get(col_name, "") for col_name in table_headers]}
+                )
+                st.dataframe(details_table, use_container_width=True, hide_index=True)
+
+            if model_col:
+                embed_src = extract_embed_src(info.get(model_col, ""))
+                if embed_src:
+                    st.markdown("**🧊 3D Model**")
+                    components.iframe(embed_src, height=480, scrolling=True)
+                elif info.get(model_col, "").strip():
+                    st.caption(f"3D Model: {info.get(model_col, '')}")
 
         # Service/repair history for this specific vehicle, pulled from the
         # same VehicleHistory data as the View page — previously this page
         # only ever showed the static Sheet2 fields above and never
         # surfaced the vehicle's actual recorded history.
         st.markdown("---")
-        st.markdown(f"**📜 Vehicle History — {selected_vno}**")
+        st.markdown(f"**📜 Service History — {selected_vno}**")
 
         history_df = load_data()
         vehicle_history = history_df[history_df["Vehicle No"] == selected_vno]
