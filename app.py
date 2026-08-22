@@ -282,6 +282,13 @@ def get_worksheet():
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=len(COLUMN_ORDER) + 2)
         ws.append_row(COLUMN_ORDER, value_input_option="USER_ENTERED")
+    # If this worksheet was created back when COLUMN_ORDER had fewer
+    # columns (e.g. before "Vehicle Part" existed), it may not physically
+    # have enough columns for the current schema — grow it if needed
+    # before writing/reading, or a newly added column can silently fail
+    # to hold data.
+    if ws.col_count < len(COLUMN_ORDER):
+        ws.resize(cols=len(COLUMN_ORDER))
     header = ws.row_values(1)
     if header != COLUMN_ORDER:
         # gspread's Worksheet.update() signature was swapped between major
