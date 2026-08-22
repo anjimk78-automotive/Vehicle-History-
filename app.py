@@ -24,10 +24,38 @@ DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
 
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
-# NOTE: "User" added to record who entered the record (from the logged-in session).
+# Vehicle Part options, dependent on the selected Event Type.
+REPAIR_PARTS = [
+    "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs",
+    "Belt", "Electric Repairs", "Others",
+]
+SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive"]
+
+
+def vehicle_part_options(event_type):
+    if event_type == "Repair":
+        return REPAIR_PARTS
+    if event_type == "Service":
+        return SERVICE_PARTS
+    return ["N/A"]
+
+
+# NOTE: "User" added to record who entered the record (from the logged-in
+# session). "Vehicle Part" is appended last so existing rows/columns never
+# shift position — the View page reorders columns for display separately
+# (see VIEW_DISPLAY_COLUMNS below) without touching this storage order.
 COLUMN_ORDER = [
     "Timestamp", "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)",
     "Event Type", "Place", "Description of Goods / Service", "Cost", "User",
+    "Vehicle Part",
+]
+
+# Display-only column order for the View page and Vehicle Details' service
+# history — Vehicle Part shows as the 6th column here (right after Event
+# Type) even though it's stored as the last column in the sheet.
+VIEW_DISPLAY_COLUMNS = [
+    "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)", "Event Type",
+    "Vehicle Part", "Place", "Description of Goods / Service", "Cost", "User",
 ]
 
 # Login credentials (only two users use this app)
@@ -569,10 +597,15 @@ if phase == "📋 Record Entering":
         )
     else:
         # Vehicle No lives outside the form so the Vehicle Type preview
-        # updates live as soon as a vehicle is selected.
+        # updates live as soon as a vehicle is selected. Event Type is also
+        # kept outside the form for the same reason — the Vehicle Part
+        # options below depend on it, and widgets inside a form don't
+        # trigger a rerun on change, so Vehicle Part's choices wouldn't
+        # update until submit if Event Type stayed inside.
         vehicle_no = st.selectbox("Vehicle No *", vehicle_options, key="entry_vehicle_no")
         vehicle_type = vehicle_map.get(vehicle_no, "")
         st.text_input("Vehicle Type", value=vehicle_type, disabled=True)
+        event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
 
         # The Description/Cost table resets after a save. Vehicle No, Date,
         # Event Type, Mileage, and Place are meant to carry over into the
@@ -593,7 +626,14 @@ if phase == "📋 Record Entering":
                     placeholder="e.g. 15000 or NA",
                 )
             with c2:
-                event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
+                vehicle_part = st.selectbox(
+                    "Vehicle Part",
+                    vehicle_part_options(event_type),
+                    index=None,
+                    placeholder="Select a part (optional)",
+                    key="entry_vehicle_part",
+                )
+                vehicle_part = vehicle_part or ""
                 if _SELECTBOX_SUPPORTS_NEW_OPTIONS:
                     place = st.selectbox(
                         "Place *",
@@ -688,6 +728,7 @@ if phase == "📋 Record Entering":
                             # Who entered this record — pulled from the logged-in
                             # session, not user-editable.
                             "User": st.session_state["username"],
+                            "Vehicle Part": vehicle_part,
                         }
                         for desc, cost_val in valid_items
                     ]
@@ -733,7 +774,7 @@ elif phase == "📊 View":
         if place_filter:
             filtered = filtered[filtered["Place"].isin(place_filter)]
 
-        display_cols = [c for c in COLUMN_ORDER if c != "Timestamp"]
+        display_cols = list(VIEW_DISPLAY_COLUMNS)
 
         # "Total Amount" column: for rows that share the same Vehicle No,
         # Date, and Place (i.e. the same visit), the summed Cost is shown
@@ -851,7 +892,7 @@ elif phase == "🚙 Vehicle Details":
         if vehicle_history.empty:
             st.info("No service history recorded for this vehicle yet.")
         else:
-            history_display_cols = [c for c in COLUMN_ORDER if c not in ("Timestamp", "Vehicle No")]
+            history_display_cols = [c for c in VIEW_DISPLAY_COLUMNS if c != "Vehicle No"]
             st.dataframe(vehicle_history[history_display_cols], use_container_width=True, hide_index=True)
 
             vehicle_total = sum(to_number(c) for c in vehicle_history["Cost"])
