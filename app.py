@@ -768,7 +768,7 @@ elif phase == "📊 View":
     if df.empty:
         st.info("No records yet. Add one from the Record Entering section.")
     else:
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             vn_options = sorted([v for v in df["Vehicle No"].unique().tolist() if v])
             vn_filter = st.multiselect("Filter by VN", vn_options)
@@ -777,6 +777,9 @@ elif phase == "📊 View":
         with c3:
             place_options = sorted([p for p in df["Place"].unique().tolist() if p])
             place_filter = st.multiselect("Filter by Place", place_options)
+        with c4:
+            part_options_view = sorted([p for p in df["Vehicle Part"].unique().tolist() if p])
+            part_filter = st.multiselect("Filter by Vehicle Part", part_options_view)
 
         filtered = df.copy()
         if vn_filter:
@@ -785,6 +788,8 @@ elif phase == "📊 View":
             filtered = filtered[filtered["Event Type"].isin(type_filter)]
         if place_filter:
             filtered = filtered[filtered["Place"].isin(place_filter)]
+        if part_filter:
+            filtered = filtered[filtered["Vehicle Part"].isin(part_filter)]
 
         display_cols = list(VIEW_DISPLAY_COLUMNS)
 
