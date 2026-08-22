@@ -626,14 +626,19 @@ if phase == "📋 Record Entering":
                     placeholder="e.g. 15000 or NA",
                 )
             with c2:
+                # If a previously selected Vehicle Part isn't valid for the
+                # now-current Event Type (e.g. switched from Repair to
+                # Service), clear it before the widget renders — otherwise
+                # Streamlit errors because the stored selection isn't in
+                # the new options list.
+                part_options = vehicle_part_options(event_type)
+                if st.session_state.get("entry_vehicle_part") not in part_options:
+                    st.session_state.pop("entry_vehicle_part", None)
                 vehicle_part = st.selectbox(
                     "Vehicle Part",
-                    vehicle_part_options(event_type),
-                    index=None,
-                    placeholder="Select a part (optional)",
+                    part_options,
                     key="entry_vehicle_part",
                 )
-                vehicle_part = vehicle_part or ""
                 if _SELECTBOX_SUPPORTS_NEW_OPTIONS:
                     place = st.selectbox(
                         "Place *",
