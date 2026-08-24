@@ -29,7 +29,7 @@ REPAIR_PARTS = [
     "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs",
     "Belt", "Electric Repairs", "Others",
 ]
-SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive"]
+SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive","Other"]
 
 
 def vehicle_part_options(event_type):
