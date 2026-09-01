@@ -635,17 +635,11 @@ if phase == "📋 Record Entering":
                     placeholder="e.g. 15000 or NA",
                 )
             with c2:
-                # Keying this widget by the current Event Type (rather than
-                # a fixed key) guarantees Streamlit renders a fresh
-                # selectbox — with the correct default for that Event
-                # Type — every time Event Type changes, instead of
-                # depending on manually resetting stored widget state.
+                # part_options still depends on Event Type — it now feeds
+                # the Vehicle Part column's dropdown inside the table below
+                # instead of a single selectbox here, so each line item can
+                # have its own Vehicle Part.
                 part_options = vehicle_part_options(event_type)
-                vehicle_part = st.selectbox(
-                    "Vehicle Part",
-                    part_options,
-                    key=f"entry_vehicle_part_{event_type}",
-                )
                 if _SELECTBOX_SUPPORTS_NEW_OPTIONS:
                     place = st.selectbox(
                         "Place *",
@@ -659,15 +653,20 @@ if phase == "📋 Record Entering":
                 else:
                     place = st.text_input("Place *", key="entry_place")
 
-            st.markdown("**Description of Goods / Service \\* and Cost \\***")
+            st.markdown("**Description of Goods / Service \\*, Vehicle Part, and Cost \\***")
             items_df = st.data_editor(
-                pd.DataFrame({"Description of Goods / Service *": [""], "Cost *": [0.0]}),
+                pd.DataFrame({
+                    "Description of Goods / Service *": [""],
+                    "Vehicle Part": [part_options[0]],
+                    "Cost *": [0.0],
+                }),
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
                 key=items_key,
                 column_config={
                     "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
+                    "Vehicle Part": st.column_config.SelectboxColumn(options=part_options),
                     "Cost *": st.column_config.NumberColumn(step=0.01, format="%.2f"),
                 },
             )
@@ -705,6 +704,7 @@ if phase == "📋 Record Entering":
                 incomplete_row = False
                 for _, item in items_df.iterrows():
                     desc = str(item.get("Description of Goods / Service *", "") or "").strip()
+                    row_part = str(item.get("Vehicle Part", "") or "").strip() or part_options[0]
                     try:
                         cost_val = float(item.get("Cost *", 0.0) or 0.0)
                     except (TypeError, ValueError):
@@ -715,7 +715,7 @@ if phase == "📋 Record Entering":
                     if not desc:
                         incomplete_row = True
                         continue
-                    valid_items.append((desc, cost_val))
+                    valid_items.append((desc, row_part, cost_val))
 
                 if incomplete_row:
                     errors.append("Each row with a Cost needs a Description of Goods / Service too.")
@@ -740,9 +740,9 @@ if phase == "📋 Record Entering":
                             # Who entered this record — pulled from the logged-in
                             # session, not user-editable.
                             "User": st.session_state["username"],
-                            "Vehicle Part": vehicle_part,
+                            "Vehicle Part": row_part,
                         }
-                        for desc, cost_val in valid_items
+                        for desc, row_part, cost_val in valid_items
                     ]
                     append_records(records)
                     entry_word = "entry" if len(records) == 1 else "entries"
