@@ -4,6 +4,7 @@ import time
 from datetime import date
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -584,7 +585,7 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # =========================================================================
 phase = st.radio(
     "Phase",
-    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details"],
+    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -917,6 +918,86 @@ elif phase == "🚙 Vehicle Details":
                 f"Total Amount: {vehicle_total:,.2f}</p>",
                 unsafe_allow_html=True,
             )
+
+# =========================================================================
+# PHASE 4 — ANALYTICS
+# =========================================================================
+elif phase == "📈 Analytics":
+    st.markdown("#### 📈 Analytics")
+
+    analytics_df = load_data()
+
+    if analytics_df.empty:
+        st.info("No records yet. Add one from the Record Entering section.")
+    else:
+        a1, a2, a3, a4 = st.columns(4)
+        with a1:
+            an_vn_options = sorted([v for v in analytics_df["Vehicle No"].unique().tolist() if v])
+            an_vn_filter = st.multiselect("Vehicle No", an_vn_options, key="analytics_vehicle_no")
+        with a2:
+            an_timeframe = st.selectbox("Time Frame", ["Monthly", "Yearly"], key="analytics_timeframe")
+        with a3:
+            an_event_filter = st.multiselect("Event Type", EVENT_TYPES, key="analytics_event_type")
+        with a4:
+            an_part_options = sorted([p for p in analytics_df["Vehicle Part"].unique().tolist() if p])
+            an_part_filter = st.multiselect("Vehicle Part", an_part_options, key="analytics_vehicle_part")
+
+        an_filtered = analytics_df.copy()
+        if an_vn_filter:
+            an_filtered = an_filtered[an_filtered["Vehicle No"].isin(an_vn_filter)]
+        if an_event_filter:
+            an_filtered = an_filtered[an_filtered["Event Type"].isin(an_event_filter)]
+        if an_part_filter:
+            an_filtered = an_filtered[an_filtered["Vehicle Part"].isin(an_part_filter)]
+
+        if an_filtered.empty:
+            st.info("No records match the selected filters.")
+        else:
+            # Parse Date and drop rows where it can't be parsed, so a bad/
+            # blank Date cell can't crash the grouping below.
+            an_dates = pd.to_datetime(an_filtered["Date"], errors="coerce")
+            an_costs = an_filtered["Cost"].apply(to_number)
+            valid_mask = an_dates.notna()
+            an_dates = an_dates[valid_mask]
+            an_costs = an_costs[valid_mask]
+
+            if an_dates.empty:
+                st.info("No records with a valid Date match the selected filters.")
+            else:
+                if an_timeframe == "Monthly":
+                    period_labels = an_dates.dt.strftime("%Y-%m")
+                else:
+                    period_labels = an_dates.dt.strftime("%Y")
+
+                summary = (
+                    pd.DataFrame({"Period": period_labels.values, "Cost": an_costs.values})
+                    .groupby("Period", as_index=False)["Cost"].sum()
+                    .sort_values("Period")
+                )
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=summary["Period"],
+                    y=summary["Cost"],
+                    mode="lines+markers+text",
+                    text=[f"{v:,.2f}" for v in summary["Cost"]],
+                    textposition="top center",
+                    line=dict(color="#e63946", width=2),
+                    marker=dict(size=8, color="#e63946"),
+                ))
+                fig.update_layout(
+                    xaxis_title="Month" if an_timeframe == "Monthly" else "Year",
+                    yaxis_title="Total Cost",
+                    margin=dict(t=40, b=30, l=10, r=10),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                summary_display = summary.rename(
+                    columns={"Period": an_timeframe, "Cost": "Total Cost"}
+                )
+                summary_display["Total Cost"] = summary_display["Total Cost"].map(lambda x: f"{x:,.2f}")
+                st.dataframe(summary_display, use_container_width=True, hide_index=True)
+
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray;'>Vehicle History Monitoring System</p>",
