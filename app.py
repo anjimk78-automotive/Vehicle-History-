@@ -3,8 +3,8 @@ import re
 import time
 from datetime import date
 
+import altair as alt
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -975,22 +975,18 @@ elif phase == "📈 Analytics":
                     .sort_values("Period")
                 )
 
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=summary["Period"],
-                    y=summary["Cost"],
-                    mode="lines+markers+text",
-                    text=[f"{v:,.2f}" for v in summary["Cost"]],
-                    textposition="top center",
-                    line=dict(color="#e63946", width=2),
-                    marker=dict(size=8, color="#e63946"),
-                ))
-                fig.update_layout(
-                    xaxis_title="Month" if an_timeframe == "Monthly" else "Year",
-                    yaxis_title="Total Cost",
-                    margin=dict(t=40, b=30, l=10, r=10),
+                axis_title = "Month" if an_timeframe == "Monthly" else "Year"
+                base = alt.Chart(summary).encode(
+                    x=alt.X("Period:N", title=axis_title, sort=None),
+                    y=alt.Y("Cost:Q", title="Total Cost"),
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                line = base.mark_line(color="#e63946", strokeWidth=2)
+                points = base.mark_point(color="#e63946", size=70, filled=True)
+                labels = base.mark_text(
+                    align="center", baseline="line-bottom", dy=-8, color="#333333"
+                ).encode(text=alt.Text("Cost:Q", format=",.2f"))
+                chart = (line + points + labels).properties(height=420)
+                st.altair_chart(chart, use_container_width=True)
 
                 summary_display = summary.rename(
                     columns={"Period": an_timeframe, "Cost": "Total Cost"}
