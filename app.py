@@ -28,7 +28,7 @@ EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 # Vehicle Part options, dependent on the selected Event Type.
 REPAIR_PARTS = [
     "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs",
-    "Belt", "Electric Repairs", "Others",
+    "Belt", "Electric Repairs", "Others","Belt Changing"
 ]
 SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive","Other"]
 
@@ -63,7 +63,7 @@ VIEW_DISPLAY_COLUMNS = [
 USERS = {
     "Narmada": "1996",
     "Dilantha": "dilantha",
-    "Sanjaya": "2026"
+    "Admin": "2026"
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
