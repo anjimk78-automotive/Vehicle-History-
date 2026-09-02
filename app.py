@@ -994,19 +994,35 @@ elif phase == "📈 Analytics":
                 # single horizontal line running left (earliest) to right
                 # (latest).
                 an_mileage = an_filtered["Mileage (KM)"][valid_mask]
+                an_desc = an_filtered["Description of Goods / Service"][valid_mask]
                 timeline_df = pd.DataFrame({
                     "Date": an_dates.values,
                     "Mileage": an_mileage.values,
+                    "Description": an_desc.values,
                 })
+                timeline_df["_MileageNum"] = timeline_df["Mileage"].apply(to_number)
+
                 # Multiple records can share the same Date (e.g. several
                 # line items from one visit) — collapse those down to a
-                # single point per date, keeping the highest mileage
-                # reading recorded for that date.
-                timeline_df["_MileageNum"] = timeline_df["Mileage"].apply(to_number)
+                # single point per date: keep the highest mileage reading
+                # recorded for that date, and combine every distinct
+                # Description for that date into one tooltip string.
+                def _agg_timeline_group(g):
+                    best_mileage = g.sort_values("_MileageNum").iloc[-1]["Mileage"]
+                    seen = []
+                    for d in g["Description"]:
+                        d = str(d).strip()
+                        if d and d not in seen:
+                            seen.append(d)
+                    return pd.Series({
+                        "Mileage": best_mileage,
+                        "Description": "; ".join(seen) if seen else "—",
+                    })
+
                 timeline_df = (
-                    timeline_df.sort_values("_MileageNum")
-                    .drop_duplicates(subset="Date", keep="last")
-                    .drop(columns="_MileageNum")
+                    timeline_df.groupby("Date")
+                    .apply(_agg_timeline_group)
+                    .reset_index()
                     .sort_values("Date")
                     .reset_index(drop=True)
                 )
@@ -1019,7 +1035,13 @@ elif phase == "📈 Analytics":
                     y=alt.value(0),
                 )
                 tl_line = tl_base.mark_line(color="#457b9d", strokeWidth=2)
-                tl_points = tl_base.mark_point(color="#457b9d", size=90, filled=True)
+                tl_points = tl_base.mark_point(color="#457b9d", size=90, filled=True).encode(
+                    tooltip=[
+                        alt.Tooltip("DateLabel:N", title="Date"),
+                        alt.Tooltip("Mileage:N", title="Mileage (KM)"),
+                        alt.Tooltip("Description:N", title="Description"),
+                    ]
+                )
                 tl_mileage_labels = tl_base.mark_text(
                     align="center", baseline="bottom", dy=-14, color="#1d3557", fontWeight="bold"
                 ).encode(text=alt.Text("Mileage:N"))
