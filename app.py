@@ -997,7 +997,19 @@ elif phase == "📈 Analytics":
                 timeline_df = pd.DataFrame({
                     "Date": an_dates.values,
                     "Mileage": an_mileage.values,
-                }).sort_values("Date").reset_index(drop=True)
+                })
+                # Multiple records can share the same Date (e.g. several
+                # line items from one visit) — collapse those down to a
+                # single point per date, keeping the highest mileage
+                # reading recorded for that date.
+                timeline_df["_MileageNum"] = timeline_df["Mileage"].apply(to_number)
+                timeline_df = (
+                    timeline_df.sort_values("_MileageNum")
+                    .drop_duplicates(subset="Date", keep="last")
+                    .drop(columns="_MileageNum")
+                    .sort_values("Date")
+                    .reset_index(drop=True)
+                )
                 timeline_df["DateLabel"] = pd.to_datetime(timeline_df["Date"]).dt.strftime("%Y-%m-%d")
                 timeline_df["Order"] = range(len(timeline_df))
 
