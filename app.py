@@ -988,11 +988,45 @@ elif phase == "📈 Analytics":
                 chart = (line + points + labels).properties(height=420)
                 st.altair_chart(chart, use_container_width=True)
 
+                # Horizontal service timeline: one point per service record,
+                # ordered strictly by Date. Mileage is shown above each
+                # point and the Date is shown below it, connected by a
+                # single horizontal line running left (earliest) to right
+                # (latest).
+                an_mileage = an_filtered["Mileage (KM)"][valid_mask]
+                timeline_df = pd.DataFrame({
+                    "Date": an_dates.values,
+                    "Mileage": an_mileage.values,
+                }).sort_values("Date").reset_index(drop=True)
+                timeline_df["DateLabel"] = pd.to_datetime(timeline_df["Date"]).dt.strftime("%Y-%m-%d")
+                timeline_df["Order"] = range(len(timeline_df))
+
+                st.markdown("**🛣️ Service Timeline (Mileage & Date)**")
+                tl_base = alt.Chart(timeline_df).encode(
+                    x=alt.X("Order:O", axis=None, sort=None),
+                    y=alt.value(0),
+                )
+                tl_line = tl_base.mark_line(color="#457b9d", strokeWidth=2)
+                tl_points = tl_base.mark_point(color="#457b9d", size=90, filled=True)
+                tl_mileage_labels = tl_base.mark_text(
+                    align="center", baseline="bottom", dy=-14, color="#1d3557", fontWeight="bold"
+                ).encode(text=alt.Text("Mileage:N"))
+                tl_date_labels = tl_base.mark_text(
+                    align="center", baseline="top", dy=14, color="#333333"
+                ).encode(text=alt.Text("DateLabel:N"))
+                tl_chart = (tl_line + tl_points + tl_mileage_labels + tl_date_labels).properties(
+                    height=160
+                )
+                st.altair_chart(tl_chart, use_container_width=True)
+
                 summary_display = summary.rename(
                     columns={"Period": an_timeframe, "Cost": "Total Cost"}
                 )
                 summary_display["Total Cost"] = summary_display["Total Cost"].map(lambda x: f"{x:,.2f}")
-                st.dataframe(summary_display, use_container_width=True, hide_index=True)
+                # Data table is hidden behind an expander by default now —
+                # only the charts above show automatically.
+                with st.expander("📄 Show data table", expanded=False):
+                    st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.markdown(
