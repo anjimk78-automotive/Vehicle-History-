@@ -657,8 +657,9 @@ if phase == "📋 Record Entering":
             items_df = st.data_editor(
                 pd.DataFrame({
                     "Description of Goods / Service *": [""],
-                    "Vehicle Part": [part_options[0]],
                     "Cost *": [0.0],
+                    "Vehicle Part": [part_options[0]]
+                    
                 }),
                 num_rows="dynamic",
                 use_container_width=True,
@@ -666,8 +667,9 @@ if phase == "📋 Record Entering":
                 key=items_key,
                 column_config={
                     "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
-                    "Vehicle Part": st.column_config.SelectboxColumn(options=part_options),
                     "Cost *": st.column_config.NumberColumn(step=0.01, format="%.2f"),
+                    "Vehicle Part": st.column_config.SelectboxColumn(options=part_options)
+                    
                 },
             )
 
