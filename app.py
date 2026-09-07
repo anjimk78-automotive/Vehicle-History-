@@ -63,7 +63,7 @@ VIEW_DISPLAY_COLUMNS = [
 USERS = {
     "Narmada": "1996",
     "Dilantha": "dilantha",
-    "Admin": "2026"
+    "User1": "2026"
 }
 
 # Background image used behind the blurred login card (auto-maintenance themed).
