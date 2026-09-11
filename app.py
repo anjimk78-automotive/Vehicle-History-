@@ -1,5 +1,7 @@
 import inspect
+import io
 import re
+import csv
 import time
 from datetime import date
 
@@ -820,22 +822,46 @@ elif phase == "📊 View":
             unsafe_allow_html=True,
         )
 
-        # Build the export with a trailing Total row, and encode with a
-        # UTF-8 BOM (utf-8-sig) — plain "utf-8" is what was making Sinhala
-        # (and any other non-Latin) text show up as garbled characters when
-        # opened in Excel, since Excel doesn't reliably auto-detect UTF-8
-        # without the BOM. "User" is left out of the download on purpose —
-        # it stays visible in the on-screen table above, just not exported.
-        export_cols = [c for c in display_cols if c != "User"] + ["Total Amount"]
-        export_df = table_df[export_cols].copy()
-        total_row = {col: "" for col in export_cols}
-        total_row[export_cols[0]] = "Total"
-        total_row["Cost"] = f"{total_amount:,.2f}"
-        export_df = pd.concat([export_df, pd.DataFrame([total_row])], ignore_index=True)
+        # Custom CSV layout: a small header block (report title, the
+        # Vehicle No/Type involved, and the Event Type/Vehicle Part
+        # involved) followed by a slimmer table — Vehicle No, Vehicle
+        # Type, Event Type, Vehicle Part, and User are summarized in that
+        # header instead of repeated on every row. Built with the csv
+        # module (not manual string-joining) so any comma/quote inside a
+        # Description cell is escaped correctly. Encoded with a UTF-8 BOM
+        # (utf-8-sig) since plain "utf-8" was making Sinhala (and any
+        # other non-Latin) text show up garbled when opened in Excel.
+        vn_type_pairs = sorted({
+            f"{vn} ({vt})" if vt else vn
+            for vn, vt in zip(filtered["Vehicle No"], filtered["Vehicle Type"])
+            if vn
+        })
+        event_part_pairs = sorted({
+            f"{et} - {vp}" if vp else et
+            for et, vp in zip(filtered["Event Type"], filtered["Vehicle Part"])
+            if et
+        })
+
+        export_table_cols = [
+            "Date", "Mileage (KM)", "Place",
+            "Description of Goods / Service", "Cost", "Total Amount",
+        ]
+        export_table_df = table_df[export_table_cols]
+
+        export_buffer = io.StringIO()
+        csv_writer = csv.writer(export_buffer)
+        csv_writer.writerow(["Vehicle History Monitoring System - KMN"])
+        csv_writer.writerow(["; ".join(vn_type_pairs)])
+        csv_writer.writerow(["; ".join(event_part_pairs)])
+        csv_writer.writerow([])
+        csv_writer.writerow(export_table_cols)
+        for row in export_table_df.itertuples(index=False, name=None):
+            csv_writer.writerow(row)
+        csv_writer.writerow(["Total", "", "", "", f"{total_amount:,.2f}", ""])
 
         st.download_button(
             "⬇️ Download filtered results as CSV",
-            export_df.to_csv(index=False).encode("utf-8-sig"),
+            export_buffer.getvalue().encode("utf-8-sig"),
             file_name="vehicle_history_export.csv",
             mime="text/csv",
         )
