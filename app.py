@@ -782,7 +782,14 @@ elif phase == "📊 View":
             place_options = sorted([p for p in df["Place"].unique().tolist() if p])
             place_filter = st.multiselect("Filter by Place", place_options)
         with c4:
-            part_options_view = sorted([p for p in df["Vehicle Part"].unique().tolist() if p])
+            # Restrict the Vehicle Part choices to whatever Event Type(s)
+            # are currently selected in "Filter by Event Type", so e.g.
+            # selecting "Repair" only offers parts that actually occur on
+            # Repair rows instead of every part ever recorded across all
+            # event types. With no Event Type selected, all parts show as
+            # before.
+            part_source_df = df[df["Event Type"].isin(type_filter)] if type_filter else df
+            part_options_view = sorted([p for p in part_source_df["Vehicle Part"].unique().tolist() if p])
             part_filter = st.multiselect("Filter by Vehicle Part", part_options_view)
 
         filtered = df.copy()
