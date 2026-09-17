@@ -29,7 +29,7 @@ EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
 # Vehicle Part options, dependent on the selected Event Type.
 REPAIR_PARTS = [
-    "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs", "Electric Repairs", "Others","Belt Changing"
+    "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs", "Electric Repairs", "Others","Belt Changing","Chasis"
 ]
 SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive","Other"]
 
