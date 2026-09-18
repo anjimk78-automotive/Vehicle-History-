@@ -3,7 +3,7 @@ import io
 import re
 import csv
 import time
-from datetime import date
+from datetime import date, timedelta
 
 import altair as alt
 import pandas as pd
@@ -24,6 +24,15 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 DEFAULT_SHEET_ID = "1uHRV6X1xYkid9XhUYULK3xrDBFVHW7oStMaLi7oY2es"
 DEFAULT_WORKSHEET_NAME = "VehicleHistory"
 DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
+DEFAULT_WEEKLY_MILEAGE_SHEET_NAME = "WeeklyMileage"
+
+# Storage columns for the Weekly Mileage Inspection sheet. It's kept in
+# long format (one row per Vehicle No + week) rather than mirroring the
+# wide on-screen table, because the on-screen week columns roll forward
+# every week (see get_upcoming_weeks) — a long format lets the sheet keep
+# every past week's data intact no matter how the displayed window shifts.
+WEEKLY_MILEAGE_COLUMNS = ["Vehicle No", "Last Serviced Mileage", "Week Start", "Week End", "Mileage"]
+NUM_WEEKLY_MILEAGE_WEEKS = 8
 
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
@@ -254,6 +263,10 @@ def _vehicle_worksheet_name():
     return st.secrets.get("gsheet", {}).get("vehicle_worksheet_name", DEFAULT_VEHICLE_SHEET_NAME)
 
 
+def _weekly_mileage_worksheet_name():
+    return st.secrets.get("gsheet", {}).get("weekly_mileage_worksheet_name", DEFAULT_WEEKLY_MILEAGE_SHEET_NAME)
+
+
 def _normalize_private_key(creds_dict: dict) -> dict:
     """Defends against the #1 cause of 'Unable to load PEM file' errors:
     a private_key that was pasted into secrets.toml with literal two-
@@ -312,6 +325,26 @@ def get_vehicle_worksheet():
     return sh.worksheet(_vehicle_worksheet_name())
 
 
+@st.cache_resource(show_spinner=False)
+def get_weekly_mileage_worksheet():
+    """Weekly Mileage Inspection data lives in its own sheet/tab (separate
+    from VehicleHistory and Sheet2), created automatically the first time
+    it's needed."""
+    sh = get_spreadsheet()
+    worksheet_name = _weekly_mileage_worksheet_name()
+    try:
+        ws = sh.worksheet(worksheet_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=len(WEEKLY_MILEAGE_COLUMNS) + 2)
+        ws.append_row(WEEKLY_MILEAGE_COLUMNS, value_input_option="USER_ENTERED")
+    if ws.col_count < len(WEEKLY_MILEAGE_COLUMNS):
+        ws.resize(cols=len(WEEKLY_MILEAGE_COLUMNS))
+    header = ws.row_values(1)
+    if header != WEEKLY_MILEAGE_COLUMNS:
+        ws.update(range_name="A1", values=[WEEKLY_MILEAGE_COLUMNS])
+    return ws
+
+
 def clear_data_caches():
     """Invalidates all cached reads so the next load fetches fresh data
     from the sheet — called after a write, and from the manual refresh
@@ -319,6 +352,7 @@ def clear_data_caches():
     _load_data_cached.clear()
     load_vehicle_details.clear()
     load_vehicle_all_columns.clear()
+    load_weekly_mileage_long.clear()
 
 
 @st.cache_data(show_spinner=False, ttl=20)
@@ -486,6 +520,117 @@ def load_vehicle_all_columns():
     return details, headers
 
 
+def get_upcoming_weeks(num_weeks=NUM_WEEKLY_MILEAGE_WEEKS, anchor=None):
+    """Returns a list of (week_start, week_end, label) tuples for Mon-Sun
+    weeks, starting from the next upcoming Monday (today itself if today
+    is a Monday). Recomputed from the current date every run, so the
+    Weekly Mileage Inspection table's week columns roll forward on their
+    own — nobody has to come back and add "the next week" by hand."""
+    today = anchor or date.today()
+    days_until_monday = (7 - today.weekday()) % 7
+    start = today + timedelta(days=days_until_monday)
+    weeks = []
+    for i in range(num_weeks):
+        wk_start = start + timedelta(weeks=i)
+        wk_end = wk_start + timedelta(days=6)
+        label = f"{wk_start.strftime('%b %d')}-{wk_end.strftime('%b %d')}"
+        weeks.append((wk_start, wk_end, label))
+    return weeks
+
+
+def _numeric_or_none(raw):
+    """Blank -> None (so the cell renders empty rather than as 0);
+    anything parseable -> an int/float; anything else -> None."""
+    raw = str(raw).strip()
+    if raw == "" or raw.lower() == "nan":
+        return None
+    try:
+        f = float(raw)
+        return int(f) if f == int(f) else f
+    except ValueError:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=20)
+def load_weekly_mileage_long(sheet_id):
+    ws = get_weekly_mileage_worksheet()
+    values = ws.get_all_values()
+    n = len(WEEKLY_MILEAGE_COLUMNS)
+    if len(values) <= 1:
+        return pd.DataFrame(columns=WEEKLY_MILEAGE_COLUMNS)
+    data_rows = values[1:]
+    padded_rows = [(row + [""] * n)[:n] for row in data_rows]
+    df = pd.DataFrame(padded_rows, columns=WEEKLY_MILEAGE_COLUMNS)
+    df = df.astype(str).replace("nan", "")
+    return df
+
+
+def build_weekly_mileage_wide_df(vehicle_options, weeks):
+    """Builds the on-screen editor table: one row per vehicle, a Last
+    Serviced Mileage column, then one column per upcoming week — filled in
+    from whatever's already saved in the long-format WeeklyMileage sheet."""
+    try:
+        long_df = load_weekly_mileage_long(_sheet_id())
+    except Exception:
+        long_df = pd.DataFrame(columns=WEEKLY_MILEAGE_COLUMNS)
+
+    last_serviced_map = {}
+    mileage_map = {}  # (vehicle_no, week_start_iso) -> raw mileage string
+    for _, row in long_df.iterrows():
+        vno = row["Vehicle No"]
+        if not vno:
+            continue
+        if str(row.get("Last Serviced Mileage", "")).strip():
+            last_serviced_map[vno] = row["Last Serviced Mileage"]
+        mileage_map[(vno, row["Week Start"])] = row["Mileage"]
+
+    data = {"Vehicle No": vehicle_options}
+    data["Last Serviced Mileage"] = [
+        _numeric_or_none(last_serviced_map.get(vno, "")) for vno in vehicle_options
+    ]
+    for wk_start, wk_end, label in weeks:
+        data[label] = [
+            _numeric_or_none(mileage_map.get((vno, wk_start.isoformat()), ""))
+            for vno in vehicle_options
+        ]
+    return pd.DataFrame(data)
+
+
+def persist_weekly_mileage_wide(df_wide, weeks):
+    """Converts the wide editor table back into long-format rows and
+    overwrites the WeeklyMileage sheet with them. This is called
+    automatically (via the data editor's on_change) the moment a cell
+    changes — there is no separate save/submit button for this table."""
+    rows = []
+    for _, row in df_wide.iterrows():
+        vno = str(row.get("Vehicle No", "")).strip()
+        if not vno:
+            continue
+        last_serviced = row.get("Last Serviced Mileage", "")
+        last_serviced = "" if pd.isna(last_serviced) else str(last_serviced)
+        for wk_start, wk_end, label in weeks:
+            mileage = row.get(label, "")
+            mileage = "" if pd.isna(mileage) else str(mileage)
+            rows.append([vno, last_serviced, wk_start.isoformat(), wk_end.isoformat(), mileage])
+
+    ws = get_weekly_mileage_worksheet()
+    ws.clear()
+    ws.update(range_name="A1", values=[WEEKLY_MILEAGE_COLUMNS] + rows)
+    load_weekly_mileage_long.clear()
+
+
+def apply_data_editor_edits(base_df, editor_state):
+    """Merges a data_editor's on_change session-state payload into a copy
+    of the base dataframe it was rendered from. This table uses
+    num_rows='fixed' (the row set is exactly the vehicle list), so only
+    edited_rows ever needs handling — no added/deleted rows."""
+    updated = base_df.copy()
+    for row_idx, changes in (editor_state or {}).get("edited_rows", {}).items():
+        for col, value in changes.items():
+            updated.at[int(row_idx), col] = value
+    return updated
+
+
 # =========================================================================
 # LOGIN GATE
 # =========================================================================
@@ -586,7 +731,7 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # =========================================================================
 phase = st.radio(
     "Phase",
-    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics"],
+    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -1035,6 +1180,65 @@ elif phase == "📈 Analytics":
                 # only the charts above show automatically.
                 with st.expander("📄 Show data table", expanded=False):
                     st.dataframe(summary_display, use_container_width=True, hide_index=True)
+
+# =========================================================================
+# PHASE 5 — WEEKLY MILEAGE INSPECTION
+# =========================================================================
+elif phase == "🛣️ Weekly Mileage Inspection":
+    st.markdown("#### 🛣️ Weekly Mileage Inspection")
+    st.caption(
+        "Enter each vehicle's odometer reading for the week — it saves automatically "
+        "as soon as you edit a cell, no save/submit button needed. This data is kept "
+        f"in its own **{_weekly_mileage_worksheet_name()}** sheet, separate from the "
+        "vehicle history records."
+    )
+
+    weekly_vehicle_options = sorted(vehicle_map.keys())
+
+    if not weekly_vehicle_options:
+        st.info(
+            f"No vehicles found in the **{_vehicle_worksheet_name()}** tab yet. "
+            "Add vehicles there (with a 'Vehicle No' column) before recording mileage."
+        )
+    else:
+        weeks = get_upcoming_weeks()
+        week_cols = [label for _, _, label in weeks]
+
+        # The base table is rebuilt from the sheet only when the vehicle
+        # list or the upcoming-weeks window actually changes (i.e. about
+        # once a week) — not on every rerun — so the rerun that on_change
+        # itself triggers can't clobber an edit with a stale re-read
+        # before the cache would otherwise expire.
+        state_key = f"{weeks[0][2]}::{len(weekly_vehicle_options)}"
+        if st.session_state.get("_weekly_mileage_state_key") != state_key:
+            st.session_state["_weekly_mileage_base_df"] = build_weekly_mileage_wide_df(
+                weekly_vehicle_options, weeks
+            )
+            st.session_state["_weekly_mileage_state_key"] = state_key
+
+        def _save_weekly_mileage():
+            editor_state = st.session_state.get("weekly_mileage_editor", {})
+            updated = apply_data_editor_edits(st.session_state["_weekly_mileage_base_df"], editor_state)
+            persist_weekly_mileage_wide(updated, weeks)
+            st.session_state["_weekly_mileage_base_df"] = updated
+
+        weekly_column_config = {
+            "Vehicle No": st.column_config.TextColumn(disabled=True),
+            "Last Serviced Mileage": st.column_config.NumberColumn(format="%d", step=1),
+        }
+        for label in week_cols:
+            weekly_column_config[label] = st.column_config.NumberColumn(format="%d", step=1)
+
+        st.data_editor(
+            st.session_state["_weekly_mileage_base_df"],
+            key="weekly_mileage_editor",
+            num_rows="fixed",
+            use_container_width=True,
+            hide_index=True,
+            column_config=weekly_column_config,
+            column_order=["Vehicle No", "Last Serviced Mileage"] + week_cols,
+            on_change=_save_weekly_mileage,
+        )
 
 st.markdown("---")
 st.markdown(
