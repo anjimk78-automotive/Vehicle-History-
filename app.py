@@ -521,20 +521,26 @@ def load_vehicle_all_columns():
 
 
 def get_upcoming_weeks(num_weeks=NUM_WEEKLY_MILEAGE_WEEKS, anchor=None):
-    """Returns a list of (week_start, week_end, label) tuples for Mon-Sun
-    weeks, starting from the next upcoming Monday (today itself if today
-    is a Monday). Recomputed from the current date every run, so the
-    Weekly Mileage Inspection table's week columns roll forward on their
-    own — nobody has to come back and add "the next week" by hand."""
+    """Returns a list of (week_date, week_date, label) tuples, one per
+    upcoming Saturday, labeled as a single date in YYYY/MM/DD format (e.g.
+    "2026/08/26") instead of a Mon-Sun range. Starts from the next
+    upcoming Saturday (today itself if today is a Saturday) and is
+    recomputed from the current date every run, so the Weekly Mileage
+    Inspection table's date columns roll forward on their own — nobody
+    has to come back and add "the next week" by hand.
+
+    The tuple still carries a start/end pair (both set to the same date)
+    so build_weekly_mileage_wide_df / persist_weekly_mileage_wide and the
+    sheet's Week Start / Week End columns don't need to change."""
     today = anchor or date.today()
-    days_until_monday = (7 - today.weekday()) % 7
-    start = today + timedelta(days=days_until_monday)
+    SATURDAY = 5  # Monday=0, ..., Saturday=5, Sunday=6
+    days_until_saturday = (SATURDAY - today.weekday()) % 7
+    start = today + timedelta(days=days_until_saturday)
     weeks = []
     for i in range(num_weeks):
-        wk_start = start + timedelta(weeks=i)
-        wk_end = wk_start + timedelta(days=6)
-        label = f"{wk_start.strftime('%b %d')}-{wk_end.strftime('%b %d')}"
-        weeks.append((wk_start, wk_end, label))
+        wk_date = start + timedelta(weeks=i)
+        label = wk_date.strftime("%Y/%m/%d")
+        weeks.append((wk_date, wk_date, label))
     return weeks
 
 
