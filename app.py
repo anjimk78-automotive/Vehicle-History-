@@ -34,6 +34,10 @@ DEFAULT_WEEKLY_MILEAGE_SHEET_NAME = "WeeklyMileage"
 WEEKLY_MILEAGE_COLUMNS = ["Vehicle No", "Last Serviced Mileage", "Week Start", "Week End", "Mileage"]
 NUM_WEEKLY_MILEAGE_WEEKS = 8
 
+# First Saturday shown in the Weekly Mileage Inspection table. The week
+# columns start here and go forward one Saturday at a time.
+WEEKLY_MILEAGE_START_DATE = date(2026, 9, 19)
+
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
 # Vehicle Part options, dependent on the selected Event Type.
@@ -522,20 +526,14 @@ def load_vehicle_all_columns():
 
 def get_upcoming_weeks(num_weeks=NUM_WEEKLY_MILEAGE_WEEKS, anchor=None):
     """Returns a list of (week_date, week_date, label) tuples, one per
-    upcoming Saturday, labeled as a single date in YYYY/MM/DD format (e.g.
-    "2026/08/26") instead of a Mon-Sun range. Starts from the next
-    upcoming Saturday (today itself if today is a Saturday) and is
-    recomputed from the current date every run, so the Weekly Mileage
-    Inspection table's date columns roll forward on their own — nobody
-    has to come back and add "the next week" by hand.
+    Saturday, starting from the fixed WEEKLY_MILEAGE_START_DATE
+    (2026/09/19) and continuing every Saturday after it (2026/09/26,
+    2026/10/03, ...), labeled in YYYY/MM/DD format.
 
     The tuple still carries a start/end pair (both set to the same date)
     so build_weekly_mileage_wide_df / persist_weekly_mileage_wide and the
     sheet's Week Start / Week End columns don't need to change."""
-    today = anchor or date.today()
-    SATURDAY = 5  # Monday=0, ..., Saturday=5, Sunday=6
-    days_until_saturday = (SATURDAY - today.weekday()) % 7
-    start = today + timedelta(days=days_until_saturday)
+    start = anchor or WEEKLY_MILEAGE_START_DATE
     weeks = []
     for i in range(num_weeks):
         wk_date = start + timedelta(weeks=i)
