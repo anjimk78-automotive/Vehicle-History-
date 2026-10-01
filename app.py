@@ -945,6 +945,13 @@ elif phase == "📊 View":
                 part_options_view = sorted([p for p in df["Vehicle Part"].unique().tolist() if p])
             part_filter = st.multiselect("Filter by Vehicle Part", part_options_view)
 
+        # Free-text search box (applies on top of the dropdown filters above).
+        search_text = st.text_input(
+            "🔍 Search",
+            placeholder="Search anything: vehicle no, place, description, part, user, date...",
+            key="view_search",
+        )
+
         filtered = df.copy()
         if vn_filter:
             filtered = filtered[filtered["Vehicle No"].isin(vn_filter)]
@@ -954,6 +961,20 @@ elif phase == "📊 View":
             filtered = filtered[filtered["Place"].isin(place_filter)]
         if part_filter:
             filtered = filtered[filtered["Vehicle Part"].isin(part_filter)]
+
+        # Free-text search across every displayed column (case-insensitive).
+        # Multiple words must ALL match, in any column, e.g. "oil colombo".
+        if search_text.strip():
+            haystack = (
+                filtered[VIEW_DISPLAY_COLUMNS]
+                .astype(str)
+                .agg(" ".join, axis=1)
+                .str.lower()
+            )
+            search_mask = pd.Series(True, index=filtered.index)
+            for term in search_text.strip().lower().split():
+                search_mask &= haystack.str.contains(term, regex=False)
+            filtered = filtered[search_mask]
 
         display_cols = list(VIEW_DISPLAY_COLUMNS)
 
