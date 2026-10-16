@@ -600,6 +600,15 @@ def build_mileage_lines_html(log_df, vehicles):
             n_val = "—"
             n_note = "Oil type not set" if serviced else "&nbsp;"
 
+        # Difference between the latest Weekly Mileage and the Last Serviced
+        # mileage (KM run since the service), shown in red on the line
+        # between those two boxes. Plain line if either value is missing.
+        if serviced and weekly:
+            diff_val = to_number(weekly[0]) - to_number(serviced[0])
+            diff_html = f'<div class="diff"><span>{html.escape(_fmt_mileage(diff_val))} km</span></div>'
+        else:
+            diff_html = '<div class="seg mid"></div>'
+
         rows_html.append(f"""
         <div class="row">
           <div class="vlabel">{html.escape(vno)}</div>
@@ -610,7 +619,7 @@ def build_mileage_lines_html(log_df, vehicles):
               <div class="box serviced">{html.escape(s_val)}</div>
               <div class="dt">{s_date}</div>
             </div>
-            <div class="seg mid"></div>
+            {diff_html}
             <div class="col">
               <div class="cap">Weekly Mileage</div>
               <div class="box weekly">{html.escape(w_val)}</div>
@@ -651,6 +660,11 @@ def build_mileage_lines_html(log_df, vehicles):
       .box.weekly {{ background: #ffffff; border: 2px solid #f2b705; }}
       .col.wide {{ flex: 0 0 150px; }}
       .box.nextsvc {{ background: #ffffff; border: 2px solid #2a9d8f; }}
+      .diff {{ flex: 0 0 80px; position: relative; height: 6px; background: #000; }}
+      .diff span {{
+        position: absolute; left: -10px; right: -10px; bottom: 9px;
+        text-align: center; color: #e00000; font-weight: 700; font-size: 13px; white-space: nowrap;
+      }}
       .dt {{ font-size: 12px; font-weight: 700; color: #111; margin-top: 3px; }}
     </style>
     {''.join(rows_html)}
