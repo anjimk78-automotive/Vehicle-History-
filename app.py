@@ -1,9 +1,10 @@
+import html
 import inspect
 import io
 import re
 import csv
 import time
-from datetime import date, timedelta
+from datetime import date
 
 import altair as alt
 import pandas as pd
@@ -24,27 +25,22 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 DEFAULT_SHEET_ID = "1uHRV6X1xYkid9XhUYULK3xrDBFVHW7oStMaLi7oY2es"
 DEFAULT_WORKSHEET_NAME = "VehicleHistory"
 DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
-DEFAULT_WEEKLY_MILEAGE_SHEET_NAME = "WeeklyMileage"
+# NOTE: a NEW tab name is used for the redesigned Weekly Mileage Inspection
+# (one row per mileage entry). The old "WeeklyMileage" tab used a different
+# column layout, so it is left untouched instead of being overwritten.
+DEFAULT_MILEAGE_LOG_SHEET_NAME = "MileageLog"
 
-# Storage columns for the Weekly Mileage Inspection sheet. It's kept in
-# long format (one row per Vehicle No + week) rather than mirroring the
-# wide on-screen table, because the on-screen week columns roll forward
-# every week (see get_upcoming_weeks) — a long format lets the sheet keep
-# every past week's data intact no matter how the displayed window shifts.
-WEEKLY_MILEAGE_COLUMNS = ["Vehicle No", "Last Serviced Mileage", "Week Start", "Week End", "Mileage"]
-NUM_WEEKLY_MILEAGE_WEEKS = 8
-
-# First Saturday shown in the Weekly Mileage Inspection table. The week
-# columns start here and go forward one Saturday at a time.
-WEEKLY_MILEAGE_START_DATE = date(2026, 9, 19)
+# Storage columns for the Weekly Mileage Inspection sheet: one row per entry.
+MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User"]
+MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage"]
 
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
 # Vehicle Part options, dependent on the selected Event Type.
 REPAIR_PARTS = [
-    "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs", "Electric Repairs", "Others","Belt Changing","Chasis"
+    "Body", "Tires", "Battery", "AC", "Engine", "Suspension Repairs", "Electric Repairs", "Others", "Belt Changing", "Chasis"
 ]
-SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive","Other"]
+SERVICE_PARTS = ["Oil Changing", "AC/Air Filter", "Tune Up & Additive", "Other"]
 
 
 def vehicle_part_options(event_type):
@@ -267,8 +263,8 @@ def _vehicle_worksheet_name():
     return st.secrets.get("gsheet", {}).get("vehicle_worksheet_name", DEFAULT_VEHICLE_SHEET_NAME)
 
 
-def _weekly_mileage_worksheet_name():
-    return st.secrets.get("gsheet", {}).get("weekly_mileage_worksheet_name", DEFAULT_WEEKLY_MILEAGE_SHEET_NAME)
+def _mileage_log_worksheet_name():
+    return st.secrets.get("gsheet", {}).get("mileage_log_worksheet_name", DEFAULT_MILEAGE_LOG_SHEET_NAME)
 
 
 def _normalize_private_key(creds_dict: dict) -> dict:
@@ -312,13 +308,7 @@ def get_worksheet():
     header = ws.row_values(1)
     if header != COLUMN_ORDER:
         # gspread's Worksheet.update() signature was swapped between major
-        # versions — old versions accept (range_name, values), newer 6.x
-        # versions accept (values, range_name). Calling it positionally as
-        # update("A1", [COLUMN_ORDER]) means that on a newer gspread
-        # install, "A1" gets treated as the *values* (and iterated
-        # character-by-character) while [COLUMN_ORDER] gets treated as the
-        # *range* — silently wiping/garbling the header row instead of
-        # writing it. Using explicit keyword args makes it version-proof.
+        # versions — explicit keyword args make this version-proof.
         ws.update(range_name="A1", values=[COLUMN_ORDER])
     return ws
 
@@ -330,22 +320,22 @@ def get_vehicle_worksheet():
 
 
 @st.cache_resource(show_spinner=False)
-def get_weekly_mileage_worksheet():
-    """Weekly Mileage Inspection data lives in its own sheet/tab (separate
-    from VehicleHistory and Sheet2), created automatically the first time
-    it's needed."""
+def get_mileage_log_worksheet():
+    """Weekly Mileage Inspection entries live in their own sheet/tab
+    (separate from VehicleHistory and Sheet2), created automatically the
+    first time it's needed. One row per mileage entry."""
     sh = get_spreadsheet()
-    worksheet_name = _weekly_mileage_worksheet_name()
+    worksheet_name = _mileage_log_worksheet_name()
     try:
         ws = sh.worksheet(worksheet_name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=len(WEEKLY_MILEAGE_COLUMNS) + 2)
-        ws.append_row(WEEKLY_MILEAGE_COLUMNS, value_input_option="USER_ENTERED")
-    if ws.col_count < len(WEEKLY_MILEAGE_COLUMNS):
-        ws.resize(cols=len(WEEKLY_MILEAGE_COLUMNS))
+        ws = sh.add_worksheet(title=worksheet_name, rows=2000, cols=len(MILEAGE_LOG_COLUMNS) + 2)
+        ws.append_row(MILEAGE_LOG_COLUMNS, value_input_option="USER_ENTERED")
+    if ws.col_count < len(MILEAGE_LOG_COLUMNS):
+        ws.resize(cols=len(MILEAGE_LOG_COLUMNS))
     header = ws.row_values(1)
-    if header != WEEKLY_MILEAGE_COLUMNS:
-        ws.update(range_name="A1", values=[WEEKLY_MILEAGE_COLUMNS])
+    if header != MILEAGE_LOG_COLUMNS:
+        ws.update(range_name="A1", values=[MILEAGE_LOG_COLUMNS])
     return ws
 
 
@@ -356,7 +346,7 @@ def clear_data_caches():
     _load_data_cached.clear()
     load_vehicle_details.clear()
     load_vehicle_all_columns.clear()
-    load_weekly_mileage_long.clear()
+    load_mileage_log.clear()
 
 
 @st.cache_data(show_spinner=False, ttl=20)
@@ -524,115 +514,111 @@ def load_vehicle_all_columns():
     return details, headers
 
 
-def get_upcoming_weeks(num_weeks=NUM_WEEKLY_MILEAGE_WEEKS, anchor=None):
-    """Returns a list of (week_date, week_date, label) tuples, one per
-    Saturday, starting from the fixed WEEKLY_MILEAGE_START_DATE
-    (2026/09/19) and continuing every Saturday after it (2026/09/26,
-    2026/10/03, ...), labeled in YYYY/MM/DD format.
-
-    The tuple still carries a start/end pair (both set to the same date)
-    so build_weekly_mileage_wide_df / persist_weekly_mileage_wide and the
-    sheet's Week Start / Week End columns don't need to change."""
-    start = anchor or WEEKLY_MILEAGE_START_DATE
-    weeks = []
-    for i in range(num_weeks):
-        wk_date = start + timedelta(weeks=i)
-        label = wk_date.strftime("%Y/%m/%d")
-        weeks.append((wk_date, wk_date, label))
-    return weeks
-
-
-def _numeric_or_none(raw):
-    """Blank -> None (so the cell renders empty rather than as 0);
-    anything parseable -> an int/float; anything else -> None."""
-    raw = str(raw).strip()
-    if raw == "" or raw.lower() == "nan":
-        return None
-    try:
-        f = float(raw)
-        return int(f) if f == int(f) else f
-    except ValueError:
-        return None
-
-
+# -------------------------------------------------------------------------
+# Weekly Mileage Inspection helpers
+# -------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=20)
-def load_weekly_mileage_long(sheet_id):
-    ws = get_weekly_mileage_worksheet()
+def load_mileage_log(sheet_id):
+    ws = get_mileage_log_worksheet()
     values = ws.get_all_values()
-    n = len(WEEKLY_MILEAGE_COLUMNS)
+    n = len(MILEAGE_LOG_COLUMNS)
     if len(values) <= 1:
-        return pd.DataFrame(columns=WEEKLY_MILEAGE_COLUMNS)
+        return pd.DataFrame(columns=MILEAGE_LOG_COLUMNS)
     data_rows = values[1:]
     padded_rows = [(row + [""] * n)[:n] for row in data_rows]
-    df = pd.DataFrame(padded_rows, columns=WEEKLY_MILEAGE_COLUMNS)
+    df = pd.DataFrame(padded_rows, columns=MILEAGE_LOG_COLUMNS)
     df = df.astype(str).replace("nan", "")
     return df
 
 
-def build_weekly_mileage_wide_df(vehicle_options, weeks):
-    """Builds the on-screen editor table: one row per vehicle, a Last
-    Serviced Mileage column, then one column per upcoming week — filled in
-    from whatever's already saved in the long-format WeeklyMileage sheet."""
-    try:
-        long_df = load_weekly_mileage_long(_sheet_id())
-    except Exception:
-        long_df = pd.DataFrame(columns=WEEKLY_MILEAGE_COLUMNS)
-
-    last_serviced_map = {}
-    mileage_map = {}  # (vehicle_no, week_start_iso) -> raw mileage string
-    for _, row in long_df.iterrows():
-        vno = row["Vehicle No"]
-        if not vno:
-            continue
-        if str(row.get("Last Serviced Mileage", "")).strip():
-            last_serviced_map[vno] = row["Last Serviced Mileage"]
-        mileage_map[(vno, row["Week Start"])] = row["Mileage"]
-
-    data = {"Vehicle No": vehicle_options}
-    data["Last Serviced Mileage"] = [
-        _numeric_or_none(last_serviced_map.get(vno, "")) for vno in vehicle_options
-    ]
-    for wk_start, wk_end, label in weeks:
-        data[label] = [
-            _numeric_or_none(mileage_map.get((vno, wk_start.isoformat()), ""))
-            for vno in vehicle_options
-        ]
-    return pd.DataFrame(data)
+def append_mileage_record(record: dict):
+    ws = get_mileage_log_worksheet()
+    row = [str(record.get(c, "")) for c in MILEAGE_LOG_COLUMNS]
+    ws.append_row(row, value_input_option="USER_ENTERED")
+    load_mileage_log.clear()
 
 
-def persist_weekly_mileage_wide(df_wide, weeks):
-    """Converts the wide editor table back into long-format rows and
-    overwrites the WeeklyMileage sheet with them. This is called
-    automatically (via the data editor's on_change) the moment a cell
-    changes — there is no separate save/submit button for this table."""
-    rows = []
-    for _, row in df_wide.iterrows():
-        vno = str(row.get("Vehicle No", "")).strip()
-        if not vno:
-            continue
-        last_serviced = row.get("Last Serviced Mileage", "")
-        last_serviced = "" if pd.isna(last_serviced) else str(last_serviced)
-        for wk_start, wk_end, label in weeks:
-            mileage = row.get(label, "")
-            mileage = "" if pd.isna(mileage) else str(mileage)
-            rows.append([vno, last_serviced, wk_start.isoformat(), wk_end.isoformat(), mileage])
-
-    ws = get_weekly_mileage_worksheet()
-    ws.clear()
-    ws.update(range_name="A1", values=[WEEKLY_MILEAGE_COLUMNS] + rows)
-    load_weekly_mileage_long.clear()
+def latest_mileage_entry(log_df, vehicle_no, mileage_type):
+    """Returns (mileage, date_str) of the most recent entry (by Date, then
+    by Timestamp) for this vehicle and mileage type, or None."""
+    if log_df.empty:
+        return None
+    sub = log_df[(log_df["Vehicle No"] == vehicle_no) & (log_df["Mileage Type"] == mileage_type)]
+    if sub.empty:
+        return None
+    sub = sub.sort_values(["Date", "Timestamp"], ascending=[False, False])
+    top = sub.iloc[0]
+    return top["Mileage (KM)"], top["Date"]
 
 
-def apply_data_editor_edits(base_df, editor_state):
-    """Merges a data_editor's on_change session-state payload into a copy
-    of the base dataframe it was rendered from. This table uses
-    num_rows='fixed' (the row set is exactly the vehicle list), so only
-    edited_rows ever needs handling — no added/deleted rows."""
-    updated = base_df.copy()
-    for row_idx, changes in (editor_state or {}).get("edited_rows", {}).items():
-        for col, value in changes.items():
-            updated.at[int(row_idx), col] = value
-    return updated
+def _fmt_mileage(value):
+    num = to_number(value)
+    if str(value).strip() == "":
+        return "—"
+    return f"{int(num)}" if num == int(num) else f"{num}"
+
+
+def build_mileage_lines_html(log_df, vehicles):
+    """One horizontal 'line' per vehicle: a thick black track with an orange
+    Last Serviced box and a white Weekly Mileage box (each with its date
+    underneath), mirroring the reference layout."""
+    rows_html = []
+    for vno in vehicles:
+        serviced = latest_mileage_entry(log_df, vno, "Serviced Mileage")
+        weekly = latest_mileage_entry(log_df, vno, "Weekly Mileage")
+
+        s_val = _fmt_mileage(serviced[0]) if serviced else "—"
+        s_date = html.escape(serviced[1]) if serviced else "&nbsp;"
+        w_val = _fmt_mileage(weekly[0]) if weekly else "—"
+        w_date = html.escape(weekly[1]) if weekly else "&nbsp;"
+
+        rows_html.append(f"""
+        <div class="row">
+          <div class="vlabel">{html.escape(vno)}</div>
+          <div class="track">
+            <div class="seg short"></div>
+            <div class="col">
+              <div class="cap">Last Serviced</div>
+              <div class="box serviced">{html.escape(s_val)}</div>
+              <div class="dt">{s_date}</div>
+            </div>
+            <div class="seg mid"></div>
+            <div class="col">
+              <div class="cap">Weekly Mileage</div>
+              <div class="box weekly">{html.escape(w_val)}</div>
+              <div class="dt">{w_date}</div>
+            </div>
+            <div class="seg long"></div>
+          </div>
+        </div>
+        """)
+
+    return f"""
+    <style>
+      body {{ margin: 0; font-family: "Source Sans Pro", Arial, sans-serif; background: transparent; }}
+      .row {{
+        display: flex; align-items: center; height: 104px;
+        background: #ffffff; border: 1px solid #cfcfcf; border-radius: 6px;
+        margin-bottom: 10px; padding: 0 10px; box-sizing: border-box;
+      }}
+      .vlabel {{ flex: 0 0 140px; text-align: center; font-weight: 700; font-size: 15px; color: #111; }}
+      .track {{ flex: 1; display: flex; align-items: center; min-width: 0; }}
+      .seg {{ height: 6px; background: #000; }}
+      .seg.short {{ flex: 0 0 24px; }}
+      .seg.mid {{ flex: 0 0 40px; }}
+      .seg.long {{ flex: 1; }}
+      .col {{ flex: 0 0 112px; text-align: center; }}
+      .cap {{ font-size: 13px; color: #111; margin-bottom: 3px; white-space: nowrap; }}
+      .box {{
+        height: 38px; line-height: 38px; font-weight: 700; font-size: 18px;
+        box-sizing: border-box; color: #111;
+      }}
+      .box.serviced {{ background: #ed7d31; }}
+      .box.weekly {{ background: #ffffff; border: 2px solid #f2b705; }}
+      .dt {{ font-size: 12px; font-weight: 700; color: #111; margin-top: 3px; }}
+    </style>
+    {''.join(rows_html)}
+    """
 
 
 # =========================================================================
@@ -667,7 +653,6 @@ inject_base_style()
 top_l, top_r = st.columns([5, 1])
 with top_l:
     st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
-    #st.subheader("KMN Automotive")
 with top_r:
     st.write("")
     st.write(f"👤 {st.session_state['username']}")
@@ -708,7 +693,8 @@ if not _gsheet_configured():
             '[gsheet]\n'
             'sheet_id = "the-id-from-the-sheet-url"\n'
             'worksheet_name = "VehicleHistory"\n'
-            'vehicle_worksheet_name = "Sheet2"\n',
+            'vehicle_worksheet_name = "Sheet2"\n'
+            'mileage_log_worksheet_name = "MileageLog"\n',
             language="toml",
         )
     st.stop()
@@ -759,19 +745,14 @@ if phase == "📋 Record Entering":
         # updates live as soon as a vehicle is selected. Event Type is also
         # kept outside the form for the same reason — the Vehicle Part
         # options below depend on it, and widgets inside a form don't
-        # trigger a rerun on change, so Vehicle Part's choices wouldn't
-        # update until submit if Event Type stayed inside.
+        # trigger a rerun on change.
         vehicle_no = st.selectbox("Vehicle No *", vehicle_options, key="entry_vehicle_no")
         vehicle_type = vehicle_map.get(vehicle_no, "")
         st.text_input("Vehicle Type", value=vehicle_type, disabled=True)
         event_type = st.selectbox("Event Type", EVENT_TYPES, key="entry_event_type")
 
-        # The Description/Cost table resets after a save. Vehicle No, Date,
-        # Event Type, Mileage, and Place are meant to carry over into the
-        # next entry, so only the table is cleared here — and it's cleared
-        # by rendering it under a brand-new widget key each time (rather
-        # than reusing "entry_items"), since a data editor's internal
-        # add/edit tracking can otherwise survive a plain session_state pop.
+        # The Description/Cost table resets after a save by rendering it
+        # under a brand-new widget key each time.
         if "_items_key_version" not in st.session_state:
             st.session_state["_items_key_version"] = 0
         items_key = f"entry_items_{st.session_state['_items_key_version']}"
@@ -785,10 +766,6 @@ if phase == "📋 Record Entering":
                     placeholder="e.g. 15000 or NA",
                 )
             with c2:
-                # part_options still depends on Event Type — it now feeds
-                # the Vehicle Part column's dropdown inside the table below
-                # instead of a single selectbox here, so each line item can
-                # have its own Vehicle Part.
                 part_options = vehicle_part_options(event_type)
                 if _SELECTBOX_SUPPORTS_NEW_OPTIONS:
                     place = st.selectbox(
@@ -809,7 +786,6 @@ if phase == "📋 Record Entering":
                     "Description of Goods / Service *": [""],
                     "Cost *": [0.0],
                     "Vehicle Part": [part_options[0]]
-                    
                 }),
                 num_rows="dynamic",
                 use_container_width=True,
@@ -819,7 +795,6 @@ if phase == "📋 Record Entering":
                     "Description of Goods / Service *": st.column_config.TextColumn(width="large"),
                     "Cost *": st.column_config.NumberColumn(step=0.01, format="%.2f"),
                     "Vehicle Part": st.column_config.SelectboxColumn(options=part_options)
-                    
                 },
             )
 
@@ -846,12 +821,6 @@ if phase == "📋 Record Entering":
                     except ValueError:
                         errors.append("Mileage (KM) must be a number or 'NA'.")
 
-                # Rows where both cells are blank/zero are just unused table
-                # rows (e.g. the default empty row) and are skipped
-                # silently. A row with a Description is valid regardless of
-                # its Cost — 0 is a legitimate cost (e.g. a free item), not
-                # treated as "not filled in". A row with a Cost but no
-                # Description is flagged as incomplete.
                 valid_items = []
                 incomplete_row = False
                 for _, item in items_df.iterrows():
@@ -889,8 +858,6 @@ if phase == "📋 Record Entering":
                             "Place": place.strip(),
                             "Description of Goods / Service": desc,
                             "Cost": cost_val,
-                            # Who entered this record — pulled from the logged-in
-                            # session, not user-editable.
                             "User": st.session_state["username"],
                             "Vehicle Part": row_part,
                         }
@@ -930,13 +897,6 @@ elif phase == "📊 View":
             place_options = sorted([p for p in df["Place"].unique().tolist() if p])
             place_filter = st.multiselect("Filter by Place", place_options)
         with c4:
-            # Drive the Vehicle Part choices off vehicle_part_options() —
-            # the same lookup Record Entering uses — for whichever Event
-            # Type(s) are selected in "Filter by Event Type", so selecting
-            # "Service" here offers the Service parts list the same way
-            # selecting "Repair" offers the Repair parts list. With no
-            # Event Type selected, all parts across every event type show
-            # (same as before).
             if type_filter:
                 part_options_view = sorted({
                     p for et in type_filter for p in vehicle_part_options(et)
@@ -945,7 +905,6 @@ elif phase == "📊 View":
                 part_options_view = sorted([p for p in df["Vehicle Part"].unique().tolist() if p])
             part_filter = st.multiselect("Filter by Vehicle Part", part_options_view)
 
-        # Free-text search box (applies on top of the dropdown filters above).
         search_text = st.text_input(
             "🔍 Search",
             placeholder="Search anything: vehicle no, place, description, part, user, date...",
@@ -962,8 +921,6 @@ elif phase == "📊 View":
         if part_filter:
             filtered = filtered[filtered["Vehicle Part"].isin(part_filter)]
 
-        # Free-text search across every displayed column (case-insensitive).
-        # Multiple words must ALL match, in any column, e.g. "oil colombo".
         if search_text.strip():
             haystack = (
                 filtered[VIEW_DISPLAY_COLUMNS]
@@ -978,10 +935,6 @@ elif phase == "📊 View":
 
         display_cols = list(VIEW_DISPLAY_COLUMNS)
 
-        # "Total Amount" column: for rows that share the same Vehicle No,
-        # Date, and Place (i.e. the same visit), the summed Cost is shown
-        # only on the last row of that group — acting as a per-visit
-        # subtotal — and left blank on the other rows in the group.
         group_cols = ["Vehicle No", "Date", "Place"]
         table_df = filtered[display_cols].copy()
         cost_numeric = filtered["Cost"].apply(to_number)
@@ -1003,15 +956,6 @@ elif phase == "📊 View":
             unsafe_allow_html=True,
         )
 
-        # Custom CSV layout: a small header block (report title, the
-        # Vehicle No/Type involved, and the Event Type/Vehicle Part
-        # involved) followed by a slimmer table — Vehicle No, Vehicle
-        # Type, Event Type, Vehicle Part, and User are summarized in that
-        # header instead of repeated on every row. Built with the csv
-        # module (not manual string-joining) so any comma/quote inside a
-        # Description cell is escaped correctly. Encoded with a UTF-8 BOM
-        # (utf-8-sig) since plain "utf-8" was making Sinhala (and any
-        # other non-Latin) text show up garbled when opened in Excel.
         vn_type_pairs = sorted({
             f"{vn} ({vt})" if vt else vn
             for vn, vt in zip(filtered["Vehicle No"], filtered["Vehicle Type"])
@@ -1062,12 +1006,6 @@ elif phase == "🚙 Vehicle Details":
             f"**{_vehicle_worksheet_name()}**.\n\n{e}"
         )
 
-    # Built from the SAME dict the values below come from, so the selected
-    # Vehicle No is always guaranteed to be a valid key into it — the
-    # previous version sourced the dropdown from a separate lookup
-    # (load_vehicle_details(), used elsewhere for the Record Entering
-    # page's Vehicle Type field), and any mismatch between the two left
-    # every value blank even though the labels still rendered.
     detail_options = sorted(all_details.keys())
 
     if not detail_options:
@@ -1082,9 +1020,6 @@ elif phase == "🚙 Vehicle Details":
         if not detail_headers:
             st.info("No additional columns found for this vehicle.")
         else:
-            # The 3D Model column (if present) is rendered as an actual
-            # embedded viewer below instead of as a row of raw embed HTML
-            # in the plain table.
             model_col = next(
                 (h for h in detail_headers if h.strip().lower() in _3D_MODEL_COLUMN_NAMES),
                 None,
@@ -1105,10 +1040,6 @@ elif phase == "🚙 Vehicle Details":
                 elif info.get(model_col, "").strip():
                     st.caption(f"3D Model: {info.get(model_col, '')}")
 
-        # Service/repair history for this specific vehicle, pulled from the
-        # same VehicleHistory data as the View page — previously this page
-        # only ever showed the static Sheet2 fields above and never
-        # surfaced the vehicle's actual recorded history.
         st.markdown("---")
         st.markdown(f"**📜 Service History — {selected_vno}**")
 
@@ -1162,8 +1093,6 @@ elif phase == "📈 Analytics":
         if an_filtered.empty:
             st.info("No records match the selected filters.")
         else:
-            # Parse Date and drop rows where it can't be parsed, so a bad/
-            # blank Date cell can't crash the grouping below.
             an_dates = pd.to_datetime(an_filtered["Date"], errors="coerce")
             an_costs = an_filtered["Cost"].apply(to_number)
             valid_mask = an_dates.notna()
@@ -1201,69 +1130,142 @@ elif phase == "📈 Analytics":
                     columns={"Period": an_timeframe, "Cost": "Total Cost"}
                 )
                 summary_display["Total Cost"] = summary_display["Total Cost"].map(lambda x: f"{x:,.2f}")
-                # Data table is hidden behind an expander by default now —
-                # only the charts above show automatically.
                 with st.expander("📄 Show data table", expanded=False):
                     st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
 # =========================================================================
-# PHASE 5 — WEEKLY MILEAGE INSPECTION
+# PHASE 5 — WEEKLY MILEAGE INSPECTION (two sub-phases)
 # =========================================================================
 elif phase == "🛣️ Weekly Mileage Inspection":
-    st.markdown("#### 🛣️ Weekly Mileage Inspection")
+    m_l, m_r = st.columns([5, 1])
+    with m_l:
+        st.markdown("#### 🛣️ Weekly Mileage Inspection")
+    with m_r:
+        if st.button("🔄 Refresh", use_container_width=True, key="mileage_refresh"):
+            load_mileage_log.clear()
+            st.rerun()
+
     st.caption(
-        "Enter each vehicle's odometer reading for the week — it saves automatically "
-        "as soon as you edit a cell, no save/submit button needed. This data is kept "
-        f"in its own **{_weekly_mileage_worksheet_name()}** sheet, separate from the "
-        "vehicle history records."
+        "Entries are kept in their own "
+        f"**{_mileage_log_worksheet_name()}** sheet, separate from the vehicle history records."
     )
 
-    weekly_vehicle_options = sorted(vehicle_map.keys())
+    mileage_phase = st.radio(
+        "Mileage phase",
+        ["✍️ Entering", "📍 Mileage Lines"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mileage_subphase",
+    )
+    st.markdown("---")
 
-    if not weekly_vehicle_options:
+    vehicle_types_available = sorted({t for t in vehicle_map.values() if t})
+
+    if not vehicle_map:
         st.info(
             f"No vehicles found in the **{_vehicle_worksheet_name()}** tab yet. "
             "Add vehicles there (with a 'Vehicle No' column) before recording mileage."
         )
-    else:
-        weeks = get_upcoming_weeks()
-        week_cols = [label for _, _, label in weeks]
-
-        # The base table is rebuilt from the sheet only when the vehicle
-        # list or the upcoming-weeks window actually changes (i.e. about
-        # once a week) — not on every rerun — so the rerun that on_change
-        # itself triggers can't clobber an edit with a stale re-read
-        # before the cache would otherwise expire.
-        state_key = f"{weeks[0][2]}::{len(weekly_vehicle_options)}"
-        if st.session_state.get("_weekly_mileage_state_key") != state_key:
-            st.session_state["_weekly_mileage_base_df"] = build_weekly_mileage_wide_df(
-                weekly_vehicle_options, weeks
-            )
-            st.session_state["_weekly_mileage_state_key"] = state_key
-
-        def _save_weekly_mileage():
-            editor_state = st.session_state.get("weekly_mileage_editor", {})
-            updated = apply_data_editor_edits(st.session_state["_weekly_mileage_base_df"], editor_state)
-            persist_weekly_mileage_wide(updated, weeks)
-            st.session_state["_weekly_mileage_base_df"] = updated
-
-        weekly_column_config = {
-            "Vehicle No": st.column_config.TextColumn(disabled=True),
-            "Last Serviced Mileage": st.column_config.NumberColumn(format="%d", step=1),
-        }
-        for label in week_cols:
-            weekly_column_config[label] = st.column_config.NumberColumn(format="%d", step=1)
-
-        st.data_editor(
-            st.session_state["_weekly_mileage_base_df"],
-            key="weekly_mileage_editor",
-            num_rows="fixed",
-            use_container_width=True,
-            hide_index=True,
-            column_config=weekly_column_config,
-            column_order=["Vehicle No", "Last Serviced Mileage"] + week_cols,
-            on_change=_save_weekly_mileage,
+    elif not vehicle_types_available:
+        st.info(
+            f"No Vehicle Type values found in the **{_vehicle_worksheet_name()}** tab. "
+            "Fill the 'Vehicle Type' column for your vehicles first."
         )
+    else:
+        try:
+            mileage_log_df = load_mileage_log(_sheet_id())
+        except Exception as e:
+            mileage_log_df = pd.DataFrame(columns=MILEAGE_LOG_COLUMNS)
+            st.error(f"❌ Could not read the **{_mileage_log_worksheet_name()}** sheet.\n\n{e}")
+
+        # ---------------------------------------------------------------
+        # SUB-PHASE 1 — ENTERING
+        # ---------------------------------------------------------------
+        if mileage_phase == "✍️ Entering":
+            # Selections live outside the form so Vehicle No's options
+            # update live as soon as the Vehicle Type changes.
+            ml_vehicle_type = st.selectbox("Vehicle Type *", vehicle_types_available, key="mil_vehicle_type")
+            ml_vehicle_options = sorted(v for v, t in vehicle_map.items() if t == ml_vehicle_type)
+            ml_vehicle_no = st.selectbox("Vehicle No *", ml_vehicle_options, key="mil_vehicle_no")
+            ml_mileage_type = st.selectbox("Mileage Type *", MILEAGE_TYPES, key="mil_mileage_type")
+
+            with st.form("mileage_entry_form", clear_on_submit=True):
+                f1, f2 = st.columns(2)
+                with f1:
+                    ml_date = st.date_input("Date *", value=date.today(), key="mil_date")
+                with f2:
+                    ml_mileage = st.text_input("Mileage (KM) *", key="mil_mileage", placeholder="e.g. 12600")
+
+                ml_submitted = st.form_submit_button("💾 Save", type="primary", use_container_width=True)
+                if ml_submitted:
+                    ml_errors = []
+                    ml_value = ""
+                    ml_str = ml_mileage.strip()
+                    if not ml_vehicle_no:
+                        ml_errors.append("Vehicle No is required.")
+                    if not ml_str:
+                        ml_errors.append("Mileage (KM) is required.")
+                    else:
+                        try:
+                            as_float = float(ml_str)
+                            if as_float < 0:
+                                ml_errors.append("Mileage (KM) must be a positive number.")
+                            else:
+                                ml_value = int(as_float) if as_float == int(as_float) else as_float
+                        except ValueError:
+                            ml_errors.append("Mileage (KM) must be a number.")
+
+                    if ml_errors:
+                        for err in ml_errors:
+                            st.error(f"❌ {err}")
+                    else:
+                        append_mileage_record({
+                            "Timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+                            "Vehicle No": ml_vehicle_no,
+                            "Vehicle Type": ml_vehicle_type,
+                            "Mileage Type": ml_mileage_type,
+                            "Date": ml_date.isoformat(),
+                            "Mileage (KM)": ml_value,
+                            "User": st.session_state["username"],
+                        })
+                        st.success(f"✅ Saved {ml_mileage_type} for {ml_vehicle_no}.")
+                        time.sleep(1)
+                        st.rerun()
+
+            # All entries for the selected vehicle, shown below the form.
+            st.markdown(f"**📜 Mileage Entries — {ml_vehicle_no}**")
+            vehicle_entries = mileage_log_df[mileage_log_df["Vehicle No"] == ml_vehicle_no] \
+                if not mileage_log_df.empty else mileage_log_df
+            if vehicle_entries.empty:
+                st.info("No mileage entries recorded for this vehicle yet.")
+            else:
+                entries_view = (
+                    vehicle_entries.sort_values(["Date", "Timestamp"], ascending=[False, False])
+                    [["Vehicle No", "Mileage Type", "Date", "Mileage (KM)"]]
+                    .rename(columns={"Mileage (KM)": "Mileage"})
+                )
+                st.dataframe(entries_view, use_container_width=True, hide_index=True)
+
+        # ---------------------------------------------------------------
+        # SUB-PHASE 2 — MILEAGE LINES
+        # ---------------------------------------------------------------
+        else:
+            lines_vehicle_type = st.selectbox("Vehicle Type", vehicle_types_available, key="mil_lines_vehicle_type")
+            lines_vehicles = sorted(v for v, t in vehicle_map.items() if t == lines_vehicle_type)
+
+            if not lines_vehicles:
+                st.info("No vehicles found for this Vehicle Type.")
+            else:
+                lines_html = build_mileage_lines_html(mileage_log_df, lines_vehicles)
+                components.html(
+                    lines_html,
+                    height=min(len(lines_vehicles) * 114 + 20, 900),
+                    scrolling=True,
+                )
+                st.caption(
+                    "Shows each vehicle's latest Serviced Mileage (orange) and latest "
+                    "Weekly Mileage (white) with their dates."
+                )
 
 st.markdown("---")
 st.markdown(
