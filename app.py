@@ -31,8 +31,13 @@ DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
 DEFAULT_MILEAGE_LOG_SHEET_NAME = "MileageLog"
 
 # Storage columns for the Weekly Mileage Inspection sheet: one row per entry.
-MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User"]
+# "Oil Type" is appended last so existing rows/columns never shift position.
+MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User", "Oil Type"]
 MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage"]
+
+# Oil Type options and how many KM after a service the next one is due.
+OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500}
+OIL_TYPES = list(OIL_SERVICE_INTERVALS.keys())
 
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
@@ -551,6 +556,18 @@ def latest_mileage_entry(log_df, vehicle_no, mileage_type):
     return top["Mileage (KM)"], top["Date"]
 
 
+def latest_serviced_oil_type(log_df, vehicle_no):
+    """Oil Type recorded on the most recent Serviced Mileage entry for this
+    vehicle, or "" if there is none (or it was saved without one)."""
+    if log_df.empty:
+        return ""
+    sub = log_df[(log_df["Vehicle No"] == vehicle_no) & (log_df["Mileage Type"] == "Serviced Mileage")]
+    if sub.empty:
+        return ""
+    sub = sub.sort_values(["Date", "Timestamp"], ascending=[False, False])
+    return str(sub.iloc[0]["Oil Type"]).strip()
+
+
 def _fmt_mileage(value):
     num = to_number(value)
     if str(value).strip() == "":
@@ -572,6 +589,17 @@ def build_mileage_lines_html(log_df, vehicles):
         w_val = _fmt_mileage(weekly[0]) if weekly else "—"
         w_date = html.escape(weekly[1]) if weekly else "&nbsp;"
 
+        # Next service = last serviced mileage + the interval for the oil
+        # used at that service (Castrol 5000 km, Bajaj Genuine 2500 km).
+        oil_type = latest_serviced_oil_type(log_df, vno)
+        interval = OIL_SERVICE_INTERVALS.get(oil_type)
+        if serviced and interval:
+            n_val = _fmt_mileage(to_number(serviced[0]) + interval)
+            n_note = f"{html.escape(oil_type)} (+{interval} km)"
+        else:
+            n_val = "—"
+            n_note = "Oil type not set" if serviced else "&nbsp;"
+
         rows_html.append(f"""
         <div class="row">
           <div class="vlabel">{html.escape(vno)}</div>
@@ -587,6 +615,12 @@ def build_mileage_lines_html(log_df, vehicles):
               <div class="cap">Weekly Mileage</div>
               <div class="box weekly">{html.escape(w_val)}</div>
               <div class="dt">{w_date}</div>
+            </div>
+            <div class="seg mid"></div>
+            <div class="col wide">
+              <div class="cap">Next Service</div>
+              <div class="box nextsvc">{html.escape(n_val)}</div>
+              <div class="dt">{n_note}</div>
             </div>
             <div class="seg long"></div>
           </div>
@@ -615,6 +649,8 @@ def build_mileage_lines_html(log_df, vehicles):
       }}
       .box.serviced {{ background: #ed7d31; }}
       .box.weekly {{ background: #ffffff; border: 2px solid #f2b705; }}
+      .col.wide {{ flex: 0 0 150px; }}
+      .box.nextsvc {{ background: #ffffff; border: 2px solid #2a9d8f; }}
       .dt {{ font-size: 12px; font-weight: 700; color: #111; margin-top: 3px; }}
     </style>
     {''.join(rows_html)}
@@ -1188,6 +1224,11 @@ elif phase == "🛣️ Weekly Mileage Inspection":
             ml_vehicle_options = sorted(v for v, t in vehicle_map.items() if t == ml_vehicle_type)
             ml_vehicle_no = st.selectbox("Vehicle No *", ml_vehicle_options, key="mil_vehicle_no")
             ml_mileage_type = st.selectbox("Mileage Type *", MILEAGE_TYPES, key="mil_mileage_type")
+            # Oil Type only applies to a service, so it appears when
+            # Serviced Mileage is selected (outside the form so it shows live).
+            ml_oil_type = ""
+            if ml_mileage_type == "Serviced Mileage":
+                ml_oil_type = st.selectbox("Oil Type *", OIL_TYPES, key="mil_oil_type")
 
             with st.form("mileage_entry_form", clear_on_submit=True):
                 f1, f2 = st.columns(2)
@@ -1227,6 +1268,7 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                             "Date": ml_date.isoformat(),
                             "Mileage (KM)": ml_value,
                             "User": st.session_state["username"],
+                            "Oil Type": ml_oil_type,
                         })
                         st.success(f"✅ Saved {ml_mileage_type} for {ml_vehicle_no}.")
                         time.sleep(1)
@@ -1264,7 +1306,8 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                 )
                 st.caption(
                     "Shows each vehicle's latest Serviced Mileage (orange) and latest "
-                    "Weekly Mileage (white) with their dates."
+                    "Weekly Mileage (white) with their dates. Next Service is the last serviced "
+                    "mileage + 5000 km for Castrol or + 2500 km for Bajaj Genuine."
                 )
 
 st.markdown("---")
