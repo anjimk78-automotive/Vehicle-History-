@@ -568,6 +568,23 @@ def latest_serviced_oil_type(log_df, vehicle_no):
     return str(sub.iloc[0]["Oil Type"]).strip()
 
 
+def next_service_interval(log_df, vehicle_no):
+    """Returns (km_interval, label) for the next service, or (None, "").
+    Lorry -> 5000 km, Car/Cab -> 6000 km (fixed per vehicle type).
+    Any other type (bikes) depends on the Oil Type of the last service:
+    Castrol 5000 km, Bajaj Genuine 2500 km."""
+    vtype = str(vehicle_map.get(vehicle_no, "")).strip().lower()
+    if "lorry" in vtype:
+        return 5000, "Lorry"
+    if "car" in vtype or "cab" in vtype:
+        return 6000, "Car/Cab"
+    oil_type = latest_serviced_oil_type(log_df, vehicle_no)
+    interval = OIL_SERVICE_INTERVALS.get(oil_type)
+    if interval:
+        return interval, oil_type
+    return None, ""
+
+
 def _fmt_mileage(value):
     num = to_number(value)
     if str(value).strip() == "":
@@ -584,7 +601,7 @@ def build_mileage_lines_html(log_df, vehicles):
         can't be worked out (no serviced/weekly entry or no oil type)."""
         s = latest_mileage_entry(log_df, v, "Serviced Mileage")
         w = latest_mileage_entry(log_df, v, "Weekly Mileage")
-        iv = OIL_SERVICE_INTERVALS.get(latest_serviced_oil_type(log_df, v))
+        iv, _ = next_service_interval(log_df, v)
         if s and w and iv:
             return (to_number(s[0]) + iv) - to_number(w[0])
         return None
@@ -613,11 +630,10 @@ def build_mileage_lines_html(log_df, vehicles):
 
         # Next service = last serviced mileage + the interval for the oil
         # used at that service (Castrol 5000 km, Bajaj Genuine 2500 km).
-        oil_type = latest_serviced_oil_type(log_df, vno)
-        interval = OIL_SERVICE_INTERVALS.get(oil_type)
+        interval, interval_label = next_service_interval(log_df, vno)
         if serviced and interval:
             n_val = _fmt_mileage(to_number(serviced[0]) + interval)
-            n_note = f"{html.escape(oil_type)} (+{interval} km)"
+            n_note = f"{html.escape(interval_label)} (+{interval} km)"
         else:
             n_val = "—"
             n_note = "Oil type not set" if serviced else "&nbsp;"
@@ -1352,7 +1368,8 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                 st.caption(
                     "Shows each vehicle's latest Serviced Mileage (orange) and latest "
                     "Weekly Mileage (white) with their dates. Next Service is the last serviced "
-                    "mileage + 5000 km for Castrol or + 2500 km for Bajaj Genuine."
+                    "mileage + 6000 km for Car/Cab, + 5000 km for Lorry, and for bikes "
+                    "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine)."
                 )
 
 st.markdown("---")
