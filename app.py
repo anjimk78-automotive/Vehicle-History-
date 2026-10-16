@@ -579,6 +579,28 @@ def build_mileage_lines_html(log_df, vehicles):
     """One horizontal 'line' per vehicle: a thick black track with an orange
     Last Serviced box and a white Weekly Mileage box (each with its date
     underneath), mirroring the reference layout."""
+    def _km_to_next_service(v):
+        """Next Service mileage minus latest Weekly Mileage, or None when it
+        can't be worked out (no serviced/weekly entry or no oil type)."""
+        s = latest_mileage_entry(log_df, v, "Serviced Mileage")
+        w = latest_mileage_entry(log_df, v, "Weekly Mileage")
+        iv = OIL_SERVICE_INTERVALS.get(latest_serviced_oil_type(log_df, v))
+        if s and w and iv:
+            return (to_number(s[0]) + iv) - to_number(w[0])
+        return None
+
+    # Lines are ordered by km left to the next service, smallest first
+    # (overdue vehicles with negative values come first); vehicles whose
+    # value can't be calculated go last, in Vehicle No order.
+    vehicles = sorted(
+        vehicles,
+        key=lambda v: (
+            _km_to_next_service(v) is None,
+            _km_to_next_service(v) if _km_to_next_service(v) is not None else 0,
+            v,
+        ),
+    )
+
     rows_html = []
     for vno in vehicles:
         serviced = latest_mileage_entry(log_df, vno, "Serviced Mileage")
