@@ -609,6 +609,15 @@ def build_mileage_lines_html(log_df, vehicles):
         else:
             diff_html = '<div class="seg mid"></div>'
 
+        # KM still to go until the next service: Next Service mileage minus
+        # the latest Weekly Mileage, shown in red on the line between those
+        # two boxes. Plain line if the next service can't be worked out yet.
+        if serviced and interval and weekly:
+            remaining_val = (to_number(serviced[0]) + interval) - to_number(weekly[0])
+            remaining_html = f'<div class="diff"><span>{html.escape(_fmt_mileage(remaining_val))} km</span></div>'
+        else:
+            remaining_html = '<div class="seg mid"></div>'
+
         rows_html.append(f"""
         <div class="row">
           <div class="vlabel">{html.escape(vno)}</div>
@@ -625,7 +634,7 @@ def build_mileage_lines_html(log_df, vehicles):
               <div class="box weekly">{html.escape(w_val)}</div>
               <div class="dt">{w_date}</div>
             </div>
-            <div class="seg mid"></div>
+            {remaining_html}
             <div class="col wide">
               <div class="cap">Next Service</div>
               <div class="box nextsvc">{html.escape(n_val)}</div>
@@ -659,7 +668,7 @@ def build_mileage_lines_html(log_df, vehicles):
       .box.serviced {{ background: #ed7d31; }}
       .box.weekly {{ background: #ffffff; border: 2px solid #f2b705; }}
       .col.wide {{ flex: 0 0 150px; }}
-      .box.nextsvc {{ background: #ffffff; border: 2px solid #2a9d8f; }}
+      .box.nextsvc {{ background: #1e6fd9; color: #ffffff; }}
       .diff {{ flex: 0 0 80px; position: relative; height: 6px; background: #000; }}
       .diff span {{
         position: absolute; left: -10px; right: -10px; bottom: 9px;
