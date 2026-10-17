@@ -568,11 +568,19 @@ def latest_serviced_oil_type(log_df, vehicle_no):
     return str(sub.iloc[0]["Oil Type"]).strip()
 
 
+def is_fixed_interval_type(vehicle_type):
+    """True for Lorry and Car/Cab vehicle types. For these the next service
+    interval is fixed (Lorry 5000 km, Car/Cab 6000 km) and does not depend
+    on the oil type, so Oil Type is a free-text, optional field for them."""
+    vtype = str(vehicle_type).strip().lower()
+    return "lorry" in vtype or "car" in vtype or "cab" in vtype
+
+
 def next_service_interval(log_df, vehicle_no):
     """Returns (km_interval, label) for the next service, or (None, "").
-    Lorry -> 5000 km, Car/Cab -> 6000 km (fixed per vehicle type).
-    Any other type (bikes) depends on the Oil Type of the last service:
-    Castrol 5000 km, Bajaj Genuine 2500 km."""
+    Lorry -> 5000 km, Car/Cab -> 6000 km (fixed per vehicle type, whatever
+    oil type is typed in). Any other type (bikes) depends on the Oil Type
+    of the last service (see OIL_SERVICE_INTERVALS)."""
     vtype = str(vehicle_map.get(vehicle_no, "")).strip().lower()
     if "lorry" in vtype:
         return 5000, "Lorry"
@@ -1303,9 +1311,19 @@ elif phase == "🛣️ Weekly Mileage Inspection":
             ml_mileage_type = st.selectbox("Mileage Type *", MILEAGE_TYPES, key="mil_mileage_type")
             # Oil Type only applies to a service, so it appears when
             # Serviced Mileage is selected (outside the form so it shows live).
+            # Lorry and Car/Cab: free-text and optional (their next service
+            # interval is fixed and doesn't depend on the oil). Other types
+            # (bikes): a required selection, as the oil decides the interval.
             ml_oil_type = ""
             if ml_mileage_type == "Serviced Mileage":
-                ml_oil_type = st.selectbox("Oil Type *", OIL_TYPES, key="mil_oil_type")
+                if is_fixed_interval_type(ml_vehicle_type):
+                    ml_oil_type = st.text_input(
+                        "Oil Type (optional)",
+                        key="mil_oil_type_text",
+                        placeholder="Type the oil used (optional)",
+                    ).strip()
+                else:
+                    ml_oil_type = st.selectbox("Oil Type *", OIL_TYPES, key="mil_oil_type")
 
             with st.form("mileage_entry_form", clear_on_submit=True):
                 f1, f2 = st.columns(2)
