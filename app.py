@@ -595,7 +595,8 @@ def _fmt_mileage(value):
 def build_mileage_lines_html(log_df, vehicles):
     """One horizontal 'line' per vehicle: a thick black track with an orange
     Last Serviced box and a white Weekly Mileage box (each with its date
-    underneath), mirroring the reference layout."""
+    underneath), mirroring the reference layout. The Rider's name (from
+    Sheet2) is shown in brackets on the line below the Vehicle No."""
     def _km_to_next_service(v):
         """Next Service mileage minus latest Weekly Mileage, or None when it
         can't be worked out (no serviced/weekly entry or no oil type)."""
@@ -622,6 +623,10 @@ def build_mileage_lines_html(log_df, vehicles):
     for vno in vehicles:
         serviced = latest_mileage_entry(log_df, vno, "Serviced Mileage")
         weekly = latest_mileage_entry(log_df, vno, "Weekly Mileage")
+
+        # Rider name (from Sheet2) shown in brackets under the Vehicle No.
+        rider_name = str(vehicle_details.get(vno, {}).get("Rider", "")).strip()
+        rider_html = f'<div class="rider">({html.escape(rider_name)})</div>' if rider_name else ""
 
         s_val = _fmt_mileage(serviced[0]) if serviced else "—"
         s_date = html.escape(serviced[1]) if serviced else "&nbsp;"
@@ -658,7 +663,10 @@ def build_mileage_lines_html(log_df, vehicles):
 
         rows_html.append(f"""
         <div class="row">
-          <div class="vlabel">{html.escape(vno)}</div>
+          <div class="vlabel">
+            <div class="vno">{html.escape(vno)}</div>
+            {rider_html}
+          </div>
           <div class="track">
             <div class="seg short"></div>
             <div class="col">
@@ -691,7 +699,15 @@ def build_mileage_lines_html(log_df, vehicles):
         background: #ffffff; border: 1px solid #cfcfcf; border-radius: 6px;
         margin-bottom: 10px; padding: 0 10px; box-sizing: border-box;
       }}
-      .vlabel {{ flex: 0 0 140px; text-align: center; font-weight: 700; font-size: 15px; color: #111; }}
+      .vlabel {{
+        flex: 0 0 140px; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center;
+      }}
+      .vno {{ font-weight: 700; font-size: 15px; color: #111; }}
+      .rider {{
+        font-weight: 600; font-size: 12px; color: #555; margin-top: 3px;
+        max-width: 130px; word-break: break-word; line-height: 1.2;
+      }}
       .track {{ flex: 1; display: flex; align-items: center; min-width: 0; }}
       .seg {{ height: 6px; background: #000; }}
       .seg.short {{ flex: 0 0 24px; }}
