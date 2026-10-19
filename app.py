@@ -14,6 +14,19 @@ import streamlit.components.v1 as components
 import gspread
 from google.oauth2.service_account import Credentials
 
+# PDF export for the Serviced Report. Imported defensively so the rest of the
+# app keeps working even if reportlab isn't installed yet (add "reportlab" to
+# requirements.txt).
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    _REPORTLAB_AVAILABLE = True
+except ImportError:
+    _REPORTLAB_AVAILABLE = False
+
 # =========================================================================
 # CONFIG
 # =========================================================================
@@ -754,6 +767,101 @@ def build_mileage_lines_html(log_df, vehicles):
     """
 
 
+# -------------------------------------------------------------------------
+# Serviced Report helpers
+# -------------------------------------------------------------------------
+def km_to_next_service(log_df, vehicle_no):
+    """KM still to go until the next service: (last Serviced Mileage +
+    service interval) minus the latest Weekly Mileage — the same figure
+    shown in red on the Mileage Lines. Negative means overdue. Returns None
+    when it can't be worked out (no serviced/weekly entry, or no interval)."""
+    serviced = latest_mileage_entry(log_df, vehicle_no, "Serviced Mileage")
+    weekly = latest_mileage_entry(log_df, vehicle_no, "Weekly Mileage")
+    interval, _ = next_service_interval(log_df, vehicle_no)
+    if serviced and weekly and interval:
+        return (to_number(serviced[0]) + interval) - to_number(weekly[0])
+    return None
+
+
+def build_serviced_report_rows(log_df, vehicle_types=None):
+    """One row per vehicle (optionally limited to the given Vehicle Types),
+    ordered by KM left to the next service, smallest first (overdue vehicles
+    first); vehicles whose value can't be calculated go last."""
+    rows = []
+    for vno, info in vehicle_details.items():
+        vtype = info.get("Vehicle Type", "")
+        if vehicle_types and vtype not in vehicle_types:
+            continue
+        rows.append({
+            "Vehicle No": vno,
+            "Vehicle Type": vtype,
+            "Rider": info.get("Rider", ""),
+            "km": km_to_next_service(log_df, vno),
+        })
+    rows.sort(key=lambda r: (r["km"] is None, r["km"] if r["km"] is not None else 0, r["Vehicle No"]))
+    return rows
+
+
+def build_serviced_report_pdf(rows):
+    """Renders the Serviced Report rows to a PDF and returns its bytes."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
+        title="Serviced Report",
+    )
+    styles = getSampleStyleSheet()
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=11)
+    cell_right = ParagraphStyle("cell_right", parent=cell, alignment=2)
+    head = ParagraphStyle("head", parent=cell, fontName="Helvetica-Bold", textColor=colors.white)
+    head_right = ParagraphStyle("head_right", parent=head, alignment=2)
+
+    elements = [
+        Paragraph("Vehicle History Monitoring System - KMN", styles["Title"]),
+        Paragraph("Serviced Report", styles["Heading2"]),
+        Paragraph(f"Generated on {date.today().isoformat()}", styles["Normal"]),
+        Spacer(1, 6 * mm),
+    ]
+
+    data = [[
+        Paragraph("Vehicle No", head),
+        Paragraph("Vehicle Type", head),
+        Paragraph("Rider", head),
+        Paragraph("KM to Next Service", head_right),
+    ]]
+    for r in rows:
+        if r["km"] is None:
+            km_html = "N/A"
+        else:
+            km_text = html.escape(_fmt_mileage(r["km"]))
+            km_html = f'<font color="#c1121f"><b>{km_text}</b></font>' if r["km"] <= 0 else km_text
+        data.append([
+            Paragraph(html.escape(str(r["Vehicle No"])), cell),
+            Paragraph(html.escape(str(r["Vehicle Type"])), cell),
+            Paragraph(html.escape(str(r["Rider"])), cell),
+            Paragraph(km_html, cell_right),
+        ])
+
+    table = Table(data, colWidths=[35 * mm, 35 * mm, 60 * mm, 50 * mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e63946")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bbbbbb")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 4 * mm))
+    elements.append(Paragraph(
+        "KM to Next Service = (last Serviced Mileage + service interval) - latest Weekly Mileage. "
+        "Red / zero or negative = service due or overdue. N/A = not enough mileage entries to calculate.",
+        ParagraphStyle("note", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#555555")),
+    ))
+    doc.build(elements)
+    return buffer.getvalue()
+
+
 # =========================================================================
 # LOGIN GATE
 # =========================================================================
@@ -854,7 +962,7 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # =========================================================================
 phase = st.radio(
     "Phase",
-    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
+    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection", "📑 Serviced Report"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -1417,6 +1525,71 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                     "mileage + 6000 km for Car/Cab, + 5000 km for Lorry LB 8797 and 227 - 4969 "
                     "(+ 6000 km for all other Lorries), and for bikes "
                     "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine)."
+                )
+
+# =========================================================================
+# PHASE 6 — SERVICED REPORT
+# =========================================================================
+elif phase == "📑 Serviced Report":
+    sr_l, sr_r = st.columns([5, 1])
+    with sr_l:
+        st.markdown("#### 📑 Serviced Report")
+    with sr_r:
+        if st.button("🔄 Refresh", use_container_width=True, key="serviced_report_refresh"):
+            load_mileage_log.clear()
+            st.rerun()
+
+    if not vehicle_details:
+        st.info(
+            f"No vehicles found in the **{_vehicle_worksheet_name()}** tab yet. "
+            "Add vehicles there (with a 'Vehicle No' column) first."
+        )
+    else:
+        try:
+            report_log_df = load_mileage_log(_sheet_id())
+        except Exception as e:
+            report_log_df = pd.DataFrame(columns=MILEAGE_LOG_COLUMNS)
+            st.error(f"❌ Could not read the **{_mileage_log_worksheet_name()}** sheet.\n\n{e}")
+
+        report_type_options = sorted({t for t in vehicle_map.values() if t})
+        report_type_filter = st.multiselect(
+            "Filter by Vehicle Type (leave empty for all)",
+            report_type_options,
+            key="serviced_report_types",
+        )
+
+        report_rows = build_serviced_report_rows(report_log_df, report_type_filter)
+
+        if not report_rows:
+            st.info("No vehicles match the selected Vehicle Type.")
+        else:
+            report_table = pd.DataFrame([
+                {
+                    "Vehicle No": r["Vehicle No"],
+                    "Vehicle Type": r["Vehicle Type"],
+                    "Rider": r["Rider"],
+                    "KM to Next Service": _fmt_mileage(r["km"]) if r["km"] is not None else "N/A",
+                }
+                for r in report_rows
+            ])
+            st.dataframe(report_table, use_container_width=True, hide_index=True)
+            st.caption(
+                "KM to Next Service = (last Serviced Mileage + service interval) − latest Weekly Mileage. "
+                "Zero or negative means the service is due or overdue. Sorted with the fewest KM left first. "
+                "N/A means there aren't enough mileage entries to calculate it."
+            )
+
+            if _REPORTLAB_AVAILABLE:
+                st.download_button(
+                    "⬇️ Download Serviced Report as PDF",
+                    build_serviced_report_pdf(report_rows),
+                    file_name=f"serviced_report_{date.today().isoformat()}.pdf",
+                    mime="application/pdf",
+                )
+            else:
+                st.warning(
+                    "PDF export needs the **reportlab** package. Add `reportlab` to your "
+                    "requirements.txt and redeploy, then the download button will appear here."
                 )
 
 st.markdown("---")
