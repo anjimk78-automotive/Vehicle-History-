@@ -39,6 +39,15 @@ MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage"]
 OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500}
 OIL_TYPES = list(OIL_SERVICE_INTERVALS.keys())
 
+# Lorries that service every 5000 km. Every other Lorry services every 6000 km.
+# Vehicle Nos are compared ignoring spaces and letter case.
+LORRY_5000_KM_VEHICLES = {"LB8797", "227-4969"}
+
+
+def _normalize_vno(vno):
+    return re.sub(r"\s+", "", str(vno)).upper()
+
+
 EVENT_TYPES = ["Service", "Repair", "Accident", "Recall", "Inspection", "Other"]
 
 # Vehicle Part options, dependent on the selected Event Type.
@@ -570,20 +579,23 @@ def latest_serviced_oil_type(log_df, vehicle_no):
 
 def is_fixed_interval_type(vehicle_type):
     """True for Lorry and Car/Cab vehicle types. For these the next service
-    interval is fixed (Lorry 5000 km, Car/Cab 6000 km) and does not depend
-    on the oil type, so Oil Type is a free-text, optional field for them."""
+    interval is fixed (Lorry 5000/6000 km, Car/Cab 6000 km) and does not
+    depend on the oil type, so Oil Type is a free-text, optional field for
+    them."""
     vtype = str(vehicle_type).strip().lower()
     return "lorry" in vtype or "car" in vtype or "cab" in vtype
 
 
 def next_service_interval(log_df, vehicle_no):
     """Returns (km_interval, label) for the next service, or (None, "").
-    Lorry -> 5000 km, Car/Cab -> 6000 km (fixed per vehicle type, whatever
-    oil type is typed in). Any other type (bikes) depends on the Oil Type
-    of the last service (see OIL_SERVICE_INTERVALS)."""
+    Lorry -> 5000 km for LB 8797 and 227 - 4969, 6000 km for all other
+    lorries. Car/Cab -> 6000 km. Any other type (bikes) depends on the
+    Oil Type of the last service (see OIL_SERVICE_INTERVALS)."""
     vtype = str(vehicle_map.get(vehicle_no, "")).strip().lower()
     if "lorry" in vtype:
-        return 5000, "Lorry"
+        if _normalize_vno(vehicle_no) in {_normalize_vno(v) for v in LORRY_5000_KM_VEHICLES}:
+            return 5000, "Lorry"
+        return 6000, "Lorry"
     if "car" in vtype or "cab" in vtype:
         return 6000, "Car/Cab"
     oil_type = latest_serviced_oil_type(log_df, vehicle_no)
@@ -1402,7 +1414,8 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                 st.caption(
                     "Shows each vehicle's latest Serviced Mileage (orange) and latest "
                     "Weekly Mileage (white) with their dates. Next Service is the last serviced "
-                    "mileage + 6000 km for Car/Cab, + 5000 km for Lorry, and for bikes "
+                    "mileage + 6000 km for Car/Cab, + 5000 km for Lorry LB 8797 and 227 - 4969 "
+                    "(+ 6000 km for all other Lorries), and for bikes "
                     "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine)."
                 )
 
