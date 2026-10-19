@@ -19,10 +19,10 @@ from google.oauth2.service_account import Credentials
 # requirements.txt).
 try:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfgen import canvas
     _REPORTLAB_AVAILABLE = True
 except ImportError:
     _REPORTLAB_AVAILABLE = False
@@ -832,63 +832,183 @@ def build_serviced_report_rows(log_df, vehicle_types=None):
     return rows
 
 
-def build_serviced_report_pdf(rows):
-    """Renders the Serviced Report rows to a PDF and returns its bytes."""
+def serviced_line_data(log_df, vehicle_no):
+    """The figures shown on one Serviced Report line — the same values the
+    Mileage Lines show for a vehicle (Last Serviced, Weekly Mileage, the two
+    red KM figures and Next Service)."""
+    serviced = latest_mileage_entry(log_df, vehicle_no, "Serviced Mileage")
+    weekly = latest_mileage_entry(log_df, vehicle_no, "Weekly Mileage")
+    interval, interval_label = next_service_interval(log_df, vehicle_no)
+
+    data = {
+        "s_val": _fmt_mileage(serviced[0]) if serviced else "—",
+        "s_date": serviced[1] if serviced else "",
+        "w_val": _fmt_mileage(weekly[0]) if weekly else "—",
+        "w_date": weekly[1] if weekly else "",
+        "diff": None,
+        "remaining": None,
+    }
+    if serviced and interval:
+        data["n_val"] = _fmt_mileage(to_number(serviced[0]) + interval)
+        data["n_note"] = f"{interval_label} (+{interval} km)"
+    else:
+        data["n_val"] = "—"
+        data["n_note"] = "Oil type not set" if serviced else ""
+    if serviced and weekly:
+        data["diff"] = f"{_fmt_mileage(to_number(weekly[0]) - to_number(serviced[0]))} km"
+    if serviced and interval and weekly:
+        data["remaining"] = f"{_fmt_mileage((to_number(serviced[0]) + interval) - to_number(weekly[0]))} km"
+    return data
+
+
+def build_serviced_report_pdf(rows, log_df):
+    """Renders the Serviced Report as a landscape PDF laid out like the
+    Mileage Lines: one line per vehicle (Vehicle No with the Rider in
+    brackets, orange Last Serviced box, white Weekly Mileage box, blue Next
+    Service box, red KM figures on the line), grouped Bike, Lorry, Car/Cab.
+    `rows` must already be ordered (see build_serviced_report_rows)."""
+    group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
-        leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
-        title="Serviced Report",
-    )
-    styles = getSampleStyleSheet()
-    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=11)
-    cell_right = ParagraphStyle("cell_right", parent=cell, alignment=2)
-    head = ParagraphStyle("head", parent=cell, fontName="Helvetica-Bold", textColor=colors.white)
-    head_right = ParagraphStyle("head_right", parent=head, alignment=2)
+    page_w, page_h = landscape(A4)
+    c = canvas.Canvas(buffer, pagesize=(page_w, page_h))
+    c.setTitle("Serviced Report")
 
-    elements = [
-        Paragraph("Vehicle History Monitoring System - KMN", styles["Title"]),
-        Paragraph("Serviced Report", styles["Heading2"]),
-        Paragraph(f"Generated on {date.today().isoformat()}", styles["Normal"]),
-        Spacer(1, 6 * mm),
-    ]
+    margin = 12 * mm
+    row_h = 26 * mm
+    gap = 3 * mm
+    head_h = 9 * mm
+    left, right = margin, page_w - margin
+    bottom_limit = margin + 6 * mm
+    black = colors.black
+    grey = colors.HexColor("#555555")
+    red = colors.HexColor("#e00000")
 
-    data = [[
-        Paragraph("Vehicle No", head),
-        Paragraph("Vehicle Type", head),
-        Paragraph("Rider", head),
-        Paragraph("KM to Next Service", head_right),
-    ]]
+    def fit_text(text, font, size, max_w):
+        text = str(text)
+        if stringWidth(text, font, size) <= max_w:
+            return text
+        while text and stringWidth(text + "..", font, size) > max_w:
+            text = text[:-1]
+        return text + ".."
+
+    def new_page_top():
+        c.showPage()
+        return page_h - margin
+
+    def draw_heading(y, text):
+        c.setFillColor(black)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(left, y - 6 * mm, text)
+        return y - head_h
+
+    def draw_row(yb, r):
+        d = serviced_line_data(log_df, r["Vehicle No"])
+        cy = yb + row_h / 2
+
+        # Row card
+        c.setFillColor(colors.white)
+        c.setStrokeColor(colors.HexColor("#cfcfcf"))
+        c.setLineWidth(0.6)
+        c.roundRect(left, yb, right - left, row_h, 1.5 * mm, stroke=1, fill=1)
+
+        # Vehicle No, with the Rider in brackets underneath
+        label_cx = left + 22 * mm
+        rider = str(r["Rider"]).strip()
+        c.setFillColor(black)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawCentredString(
+            label_cx, cy + (1.5 * mm if rider else -1.2 * mm),
+            fit_text(r["Vehicle No"], "Helvetica-Bold", 10, 38 * mm),
+        )
+        if rider:
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColor(grey)
+            c.drawCentredString(label_cx, cy - 3 * mm, fit_text(f"({rider})", "Helvetica-Bold", 8, 38 * mm))
+
+        # The thick black track
+        x_track = left + 44 * mm
+        x_end = right - 4 * mm
+        c.setFillColor(black)
+        c.rect(x_track, cy - 0.7 * mm, x_end - x_track, 1.4 * mm, stroke=0, fill=1)
+
+        box_h = 9 * mm
+
+        def draw_col(x_left, col_w, caption, value, note, fill, text_color, stroke=None):
+            cx = x_left + col_w / 2
+            bw = col_w - 2 * mm
+            c.setFillColor(black)
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(cx, cy + box_h / 2 + 2 * mm, caption)
+            c.setFillColor(fill)
+            if stroke is not None:
+                c.setStrokeColor(stroke)
+                c.setLineWidth(1)
+                c.rect(cx - bw / 2, cy - box_h / 2, bw, box_h, stroke=1, fill=1)
+            else:
+                c.rect(cx - bw / 2, cy - box_h / 2, bw, box_h, stroke=0, fill=1)
+            c.setFillColor(text_color)
+            c.setFont("Helvetica-Bold", 12)
+            c.drawCentredString(cx, cy - 1.5 * mm, value)
+            c.setFillColor(black)
+            c.setFont("Helvetica-Bold", 7.5)
+            c.drawCentredString(cx, cy - box_h / 2 - 3.5 * mm, fit_text(note, "Helvetica-Bold", 7.5, col_w + 4 * mm))
+
+        def draw_seg_text(x_left, seg_w, text):
+            if text:
+                c.setFillColor(red)
+                c.setFont("Helvetica-Bold", 8)
+                c.drawCentredString(x_left + seg_w / 2, cy + 2 * mm, text)
+
+        x = x_track + 5 * mm
+        draw_col(x, 30 * mm, "Last Serviced", d["s_val"], d["s_date"], colors.HexColor("#ed7d31"), black)
+        x += 30 * mm
+        draw_seg_text(x, 24 * mm, d["diff"])
+        x += 24 * mm
+        draw_col(x, 30 * mm, "Weekly Mileage", d["w_val"], d["w_date"], colors.white, black, stroke=colors.HexColor("#f2b705"))
+        x += 30 * mm
+        draw_seg_text(x, 24 * mm, d["remaining"])
+        x += 24 * mm
+        draw_col(x, 44 * mm, "Next Service", d["n_val"], d["n_note"], colors.HexColor("#1e6fd9"), colors.white)
+
+    # Page title
+    c.setFillColor(black)
+    c.setFont("Helvetica-Bold", 15)
+    c.drawCentredString(page_w / 2, page_h - margin - 5 * mm, "Vehicle History Monitoring System - KMN")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, page_h - margin - 14 * mm, "Serviced Report")
+    c.setFont("Helvetica", 8)
+    c.setFillColor(grey)
+    c.drawRightString(right, page_h - margin - 14 * mm, f"Generated on {date.today().isoformat()}")
+    y = page_h - margin - 19 * mm
+
+    current_rank = None
     for r in rows:
-        if r["km"] is None:
-            km_html = "N/A"
-        else:
-            km_text = html.escape(_fmt_mileage(r["km"]))
-            km_html = f'<font color="#c1121f"><b>{km_text}</b></font>' if r["km"] <= 0 else km_text
-        data.append([
-            Paragraph(html.escape(str(r["Vehicle No"])), cell),
-            Paragraph(html.escape(str(r["Vehicle Type"])), cell),
-            Paragraph(html.escape(str(r["Rider"])), cell),
-            Paragraph(km_html, cell_right),
-        ])
+        rank = vehicle_type_group_rank(r["Vehicle Type"])
+        if rank != current_rank:
+            if y - (head_h + row_h) < bottom_limit:
+                y = new_page_top()
+            y = draw_heading(y, group_names.get(rank, ""))
+            current_rank = rank
+        elif y - row_h < bottom_limit:
+            y = new_page_top()
+            y = draw_heading(y, f"{group_names.get(rank, '')} (continued)")
+        draw_row(y - row_h, r)
+        y -= row_h + gap
 
-    table = Table(data, colWidths=[35 * mm, 35 * mm, 60 * mm, 50 * mm], repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e63946")),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bbbbbb")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    elements.append(table)
-    elements.append(Spacer(1, 4 * mm))
-    elements.append(Paragraph(
-        "KM to Next Service = (last Serviced Mileage + service interval) - latest Weekly Mileage. "
-        "Red / zero or negative = service due or overdue. N/A = not enough mileage entries to calculate.",
-        ParagraphStyle("note", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#555555")),
-    ))
-    doc.build(elements)
+    if y - 9 * mm < margin:
+        y = new_page_top()
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(grey)
+    c.drawString(
+        left, y - 3 * mm,
+        "Red figures on the line: KM run since the last service (between Last Serviced and Weekly Mileage) "
+        "and KM left until the next service",
+    )
+    c.drawString(
+        left, y - 6.5 * mm,
+        "(between Weekly Mileage and Next Service). Zero or negative = service due or overdue.",
+    )
+    c.save()
     return buffer.getvalue()
 
 
@@ -1596,27 +1716,33 @@ elif phase == "📑 Serviced Report":
         if not report_rows:
             st.info("No vehicles match the selected Vehicle Type.")
         else:
-            report_table = pd.DataFrame([
-                {
-                    "Vehicle No": r["Vehicle No"],
-                    "Vehicle Type": r["Vehicle Type"],
-                    "Rider": r["Rider"],
-                    "KM to Next Service": _fmt_mileage(r["km"]) if r["km"] is not None else "N/A",
-                }
-                for r in report_rows
-            ])
-            st.dataframe(report_table, use_container_width=True, hide_index=True)
+            # Same line layout as the Weekly Mileage Inspection > Mileage Lines,
+            # one block per vehicle type group (Bike, Lorry, Car/Cab). Each block
+            # is ordered by KM left to the next service, smallest first.
+            report_group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
+            for report_rank in sorted({vehicle_type_group_rank(r["Vehicle Type"]) for r in report_rows}):
+                group_vehicles = [
+                    r["Vehicle No"] for r in report_rows
+                    if vehicle_type_group_rank(r["Vehicle Type"]) == report_rank
+                ]
+                st.markdown(f"##### {report_group_names[report_rank]}")
+                components.html(
+                    build_mileage_lines_html(report_log_df, group_vehicles),
+                    height=min(len(group_vehicles) * 114 + 20, 900),
+                    scrolling=True,
+                )
             st.caption(
-                "KM to Next Service = (last Serviced Mileage + service interval) − latest Weekly Mileage. "
-                "Zero or negative means the service is due or overdue. Grouped Bike, Lorry, then Car/Cab, "
-                "with the fewest KM left first within each group. "
-                "N/A means there aren't enough mileage entries to calculate it."
+                "Shows each vehicle's latest Serviced Mileage (orange) and latest "
+                "Weekly Mileage (white) with their dates, and the Next Service mileage (blue). "
+                "The red figures are the KM run since the last service and the KM left until the next "
+                "service (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
+                "with the fewest KM left first within each group."
             )
 
             if _REPORTLAB_AVAILABLE:
                 st.download_button(
                     "⬇️ Download Serviced Report as PDF",
-                    build_serviced_report_pdf(report_rows),
+                    build_serviced_report_pdf(report_rows, report_log_df),
                     file_name=f"serviced_report_{date.today().isoformat()}.pdf",
                     mime="application/pdf",
                 )
