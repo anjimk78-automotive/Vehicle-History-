@@ -770,6 +770,27 @@ def build_mileage_lines_html(log_df, vehicles):
 # -------------------------------------------------------------------------
 # Serviced Report helpers
 # -------------------------------------------------------------------------
+# Vehicle Types left out of the Weekly Mileage Inspection and Serviced Report.
+EXCLUDED_VEHICLE_TYPES = {"other", "others"}
+
+
+def is_excluded_vehicle_type(vehicle_type):
+    return str(vehicle_type).strip().lower() in EXCLUDED_VEHICLE_TYPES
+
+
+def vehicle_type_group_rank(vehicle_type):
+    """Serviced Report group order: Bike (0), Lorry (1), Car/Cab (2); a
+    vehicle with a blank Vehicle Type goes last (3)."""
+    vtype = str(vehicle_type).strip().lower()
+    if not vtype:
+        return 3
+    if "lorry" in vtype:
+        return 1
+    if "car" in vtype or "cab" in vtype:
+        return 2
+    return 0
+
+
 def km_to_next_service(log_df, vehicle_no):
     """KM still to go until the next service: (last Serviced Mileage +
     service interval) minus the latest Weekly Mileage — the same figure
@@ -785,11 +806,15 @@ def km_to_next_service(log_df, vehicle_no):
 
 def build_serviced_report_rows(log_df, vehicle_types=None):
     """One row per vehicle (optionally limited to the given Vehicle Types),
-    ordered by KM left to the next service, smallest first (overdue vehicles
-    first); vehicles whose value can't be calculated go last."""
+    leaving out the Others vehicle type. Rows are grouped Bike, Lorry, then
+    Car/Cab, and within each group ordered by KM left to the next service,
+    smallest first (overdue vehicles first); vehicles whose value can't be
+    calculated go last in their group."""
     rows = []
     for vno, info in vehicle_details.items():
         vtype = info.get("Vehicle Type", "")
+        if is_excluded_vehicle_type(vtype):
+            continue
         if vehicle_types and vtype not in vehicle_types:
             continue
         rows.append({
@@ -798,7 +823,12 @@ def build_serviced_report_rows(log_df, vehicle_types=None):
             "Rider": info.get("Rider", ""),
             "km": km_to_next_service(log_df, vno),
         })
-    rows.sort(key=lambda r: (r["km"] is None, r["km"] if r["km"] is not None else 0, r["Vehicle No"]))
+    rows.sort(key=lambda r: (
+        vehicle_type_group_rank(r["Vehicle Type"]),
+        r["km"] is None,
+        r["km"] if r["km"] is not None else 0,
+        r["Vehicle No"],
+    ))
     return rows
 
 
@@ -1400,7 +1430,7 @@ elif phase == "🛣️ Weekly Mileage Inspection":
     )
     st.markdown("---")
 
-    vehicle_types_available = sorted({t for t in vehicle_map.values() if t})
+    vehicle_types_available = sorted({t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)})
 
     if not vehicle_map:
         st.info(
@@ -1551,7 +1581,10 @@ elif phase == "📑 Serviced Report":
             report_log_df = pd.DataFrame(columns=MILEAGE_LOG_COLUMNS)
             st.error(f"❌ Could not read the **{_mileage_log_worksheet_name()}** sheet.\n\n{e}")
 
-        report_type_options = sorted({t for t in vehicle_map.values() if t})
+        report_type_options = sorted(
+            {t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)},
+            key=lambda t: (vehicle_type_group_rank(t), t),
+        )
         report_type_filter = st.multiselect(
             "Filter by Vehicle Type (leave empty for all)",
             report_type_options,
@@ -1575,7 +1608,8 @@ elif phase == "📑 Serviced Report":
             st.dataframe(report_table, use_container_width=True, hide_index=True)
             st.caption(
                 "KM to Next Service = (last Serviced Mileage + service interval) − latest Weekly Mileage. "
-                "Zero or negative means the service is due or overdue. Sorted with the fewest KM left first. "
+                "Zero or negative means the service is due or overdue. Grouped Bike, Lorry, then Car/Cab, "
+                "with the fewest KM left first within each group. "
                 "N/A means there aren't enough mileage entries to calculate it."
             )
 
