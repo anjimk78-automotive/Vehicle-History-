@@ -1684,7 +1684,7 @@ elif phase == "🛣️ Weekly Mileage Inspection":
             if not lines_vehicles:
                 st.info("No vehicles found for this Vehicle Type.")
             else:
-                lines_html = build_mileage_lines_html(mileage_log_df, lines_vehicles)
+                lines_html = build_mileage_lines_html(mileage_log_df, lines_vehicles, red_below_km=501)
                 components.html(
                     lines_html,
                     height=min(len(lines_vehicles) * 114 + 20, 900),
@@ -1695,7 +1695,8 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                     "Weekly Mileage (white) with their dates. Next Service is the last serviced "
                     "mileage + 6000 km for Car/Cab, + 5000 km for Lorry LB 8797 and 227 - 4969 "
                     "(+ 6000 km for all other Lorries), and for bikes "
-                    "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine)."
+                    "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine). "
+                    "A red Next Service box means 500 km or fewer are left."
                 )
 
 # =========================================================================
