@@ -96,12 +96,15 @@ VIEW_DISPLAY_COLUMNS = [
     "Vehicle Part", "Place", "Description of Goods / Service", "Cost", "User",
 ]
 
-# Login credentials (only two users use this app)
-USERS = {
-    "Narmada": "1996",
-    "Dilantha": "dilantha",
-    "User1": "2026"
-}
+# Login credentials come from Streamlit secrets (the [users] section), not
+# from the code. Add them in the app's Secrets like this:
+#   [users]
+#   Username = "password"
+# If the section is missing, nobody can log in.
+try:
+    USERS = {str(k): str(v) for k, v in st.secrets["users"].items()}
+except Exception:
+    USERS = {}
 
 # Background image used behind the blurred login card (auto-maintenance themed).
 LOGIN_BG_IMAGE_URL = "https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=1950&q=80"
