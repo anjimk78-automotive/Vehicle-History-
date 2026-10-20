@@ -30,7 +30,7 @@ except ImportError:
 # =========================================================================
 # CONFIG
 # =========================================================================
-st.set_page_config(page_title="Vehicle History Monitoring System - KMN", layout="wide", page_icon="🚗")
+st.set_page_config(page_title="Vehicle History Monitoring System - KMN", layout="wide", page_icon="🚗", initial_sidebar_state="expanded")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
@@ -1062,13 +1062,14 @@ if not st.session_state["authenticated"]:
 # =========================================================================
 inject_base_style()
 
-top_l, top_r = st.columns([5, 1])
-with top_l:
-    st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
-with top_r:
-    st.write("")
+st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
+
+# Sidebar: the signed-in user and the Log out button. (The Refresh button and
+# the section list are added to the sidebar further down, once the setup
+# checks have passed.)
+with st.sidebar:
     st.write(f"👤 {st.session_state['username']}")
-    if st.button("Log out", use_container_width=True):
+    if st.button("Log out", use_container_width=True, key="sidebar_logout"):
         st.session_state["authenticated"] = False
         st.session_state["username"] = ""
         st.rerun()
@@ -1131,12 +1132,17 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # =========================================================================
 # PHASE SELECTOR
 # =========================================================================
-phase = st.radio(
-    "Phase",
-    ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection", "📑 Serviced Report"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
+with st.sidebar:
+    # One Refresh for the whole app: clears every cached read so the next
+    # load fetches fresh data from the Google Sheet.
+    if st.button("🔄 Refresh", use_container_width=True, key="sidebar_refresh"):
+        clear_data_caches()
+        st.rerun()
+    st.markdown("---")
+    phase = st.radio(
+        "Sections",
+        ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
+    )
 st.markdown("---")
 
 # =========================================================================
@@ -1286,13 +1292,7 @@ if phase == "📋 Record Entering":
 # PHASE 2 — VIEW
 # =========================================================================
 elif phase == "📊 View":
-    h_l, h_r = st.columns([5, 1])
-    with h_l:
-        st.markdown("#### 📊 View Vehicle History")
-    with h_r:
-        if st.button("🔄 Refresh", use_container_width=True):
-            clear_data_caches()
-            st.rerun()
+    st.markdown("#### 📊 View Vehicle History")
 
     df = load_data()
 
@@ -1546,16 +1546,10 @@ elif phase == "📈 Analytics":
                     st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
 # =========================================================================
-# PHASE 5 — WEEKLY MILEAGE INSPECTION (two sub-phases)
+# PHASE 5 — WEEKLY MILEAGE INSPECTION (three sub-phases)
 # =========================================================================
 elif phase == "🛣️ Weekly Mileage Inspection":
-    m_l, m_r = st.columns([5, 1])
-    with m_l:
-        st.markdown("#### 🛣️ Weekly Mileage Inspection")
-    with m_r:
-        if st.button("🔄 Refresh", use_container_width=True, key="mileage_refresh"):
-            load_mileage_log.clear()
-            st.rerun()
+    st.markdown("#### 🛣️ Weekly Mileage Inspection")
 
     st.caption(
         "Entries are kept in their own "
@@ -1564,7 +1558,7 @@ elif phase == "🛣️ Weekly Mileage Inspection":
 
     mileage_phase = st.radio(
         "Mileage phase",
-        ["✍️ Entering", "📍 Mileage Lines"],
+        ["✍️ Entering", "📍 Mileage Lines", "📑 Serviced Report"],
         horizontal=True,
         label_visibility="collapsed",
         key="mileage_subphase",
@@ -1677,7 +1671,7 @@ elif phase == "🛣️ Weekly Mileage Inspection":
         # ---------------------------------------------------------------
         # SUB-PHASE 2 — MILEAGE LINES
         # ---------------------------------------------------------------
-        else:
+        elif mileage_phase == "📍 Mileage Lines":
             lines_vehicle_type = st.selectbox("Vehicle Type", vehicle_types_available, key="mil_lines_vehicle_type")
             lines_vehicles = sorted(v for v, t in vehicle_map.items() if t == lines_vehicle_type)
 
@@ -1699,81 +1693,61 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                     "A red Next Service box means 500 km or fewer are left."
                 )
 
-# =========================================================================
-# PHASE 6 — SERVICED REPORT
-# =========================================================================
-elif phase == "📑 Serviced Report":
-    sr_l, sr_r = st.columns([5, 1])
-    with sr_l:
-        st.markdown("#### 📑 Serviced Report")
-    with sr_r:
-        if st.button("🔄 Refresh", use_container_width=True, key="serviced_report_refresh"):
-            load_mileage_log.clear()
-            st.rerun()
-
-    if not vehicle_details:
-        st.info(
-            f"No vehicles found in the **{_vehicle_worksheet_name()}** tab yet. "
-            "Add vehicles there (with a 'Vehicle No' column) first."
-        )
-    else:
-        try:
-            report_log_df = load_mileage_log(_sheet_id())
-        except Exception as e:
-            report_log_df = pd.DataFrame(columns=MILEAGE_LOG_COLUMNS)
-            st.error(f"❌ Could not read the **{_mileage_log_worksheet_name()}** sheet.\n\n{e}")
-
-        report_type_options = sorted(
-            {t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)},
-            key=lambda t: (vehicle_type_group_rank(t), t),
-        )
-        report_type_filter = st.multiselect(
-            "Filter by Vehicle Type (leave empty for all)",
-            report_type_options,
-            key="serviced_report_types",
-        )
-
-        report_rows = build_serviced_report_rows(report_log_df, report_type_filter)
-
-        if not report_rows:
-            st.info("No vehicles match the selected Vehicle Type.")
+        # ---------------------------------------------------------------
+        # SUB-PHASE 3 — SERVICED REPORT
+        # ---------------------------------------------------------------
         else:
-            # Same line layout as the Weekly Mileage Inspection > Mileage Lines,
-            # one block per vehicle type group (Bike, Lorry, Car/Cab). Each block
-            # is ordered by KM left to the next service, smallest first.
-            report_group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
-            for report_rank in sorted({vehicle_type_group_rank(r["Vehicle Type"]) for r in report_rows}):
-                group_vehicles = [
-                    r["Vehicle No"] for r in report_rows
-                    if vehicle_type_group_rank(r["Vehicle Type"]) == report_rank
-                ]
-                st.markdown(f"##### {report_group_names[report_rank]}")
-                components.html(
-                    build_mileage_lines_html(report_log_df, group_vehicles, red_below_km=501),
-                    height=min(len(group_vehicles) * 114 + 20, 900),
-                    scrolling=True,
-                )
-            st.caption(
-                "Shows each vehicle's latest Serviced Mileage (orange) and latest "
-                "Weekly Mileage (white) with their dates, and the Next Service mileage (blue). "
-                "The red figures are the KM run since the last service and the KM left until the next "
-                "service (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
-                "with the fewest KM left first within each group. A red Next Service box means "
-                "500 km or fewer are left."
+            report_type_options = sorted(
+                {t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)},
+                key=lambda t: (vehicle_type_group_rank(t), t),
+            )
+            report_type_filter = st.multiselect(
+                "Filter by Vehicle Type (leave empty for all)",
+                report_type_options,
+                key="serviced_report_types",
             )
 
-            if _REPORTLAB_AVAILABLE:
-                st.download_button(
-                    "⬇️ Download Serviced Report as PDF",
-                    build_serviced_report_pdf(report_rows, report_log_df),
-                    file_name=f"serviced_report_{date.today().isoformat()}.pdf",
-                    mime="application/pdf",
-                )
+            report_rows = build_serviced_report_rows(mileage_log_df, report_type_filter)
+
+            if not report_rows:
+                st.info("No vehicles match the selected Vehicle Type.")
             else:
-                st.warning(
-                    "PDF export needs the **reportlab** package. Add `reportlab` to your "
-                    "requirements.txt and redeploy, then the download button will appear here."
+                # Same line layout as the Weekly Mileage Inspection > Mileage Lines,
+                # one block per vehicle type group (Bike, Lorry, Car/Cab). Each block
+                # is ordered by KM left to the next service, smallest first.
+                report_group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
+                for report_rank in sorted({vehicle_type_group_rank(r["Vehicle Type"]) for r in report_rows}):
+                    group_vehicles = [
+                        r["Vehicle No"] for r in report_rows
+                        if vehicle_type_group_rank(r["Vehicle Type"]) == report_rank
+                    ]
+                    st.markdown(f"##### {report_group_names[report_rank]}")
+                    components.html(
+                        build_mileage_lines_html(mileage_log_df, group_vehicles, red_below_km=501),
+                        height=min(len(group_vehicles) * 114 + 20, 900),
+                        scrolling=True,
+                    )
+                st.caption(
+                    "Shows each vehicle's latest Serviced Mileage (orange) and latest "
+                    "Weekly Mileage (white) with their dates, and the Next Service mileage (blue). "
+                    "The red figures are the KM run since the last service and the KM left until the next "
+                    "service (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
+                    "with the fewest KM left first within each group. A red Next Service box means "
+                    "500 km or fewer are left."
                 )
+
+                if _REPORTLAB_AVAILABLE:
+                    st.download_button(
+                        "⬇️ Download Serviced Report as PDF",
+                        build_serviced_report_pdf(report_rows, mileage_log_df),
+                        file_name=f"serviced_report_{date.today().isoformat()}.pdf",
+                        mime="application/pdf",
+                    )
+                else:
+                    st.warning(
+                        "PDF export needs the **reportlab** package. Add `reportlab` to your "
+                        "requirements.txt and redeploy, then the download button will appear here."
+                    )
 
 st.markdown("---")
 st.markdown(
