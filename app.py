@@ -618,6 +618,24 @@ def build_vehicle_card_html(vehicle_no, vehicle_src, rider_src, model_text):
     """
 
 
+def build_details_table_html(headers, info):
+    """Compact two-column table (Field | Value), one line per Sheet2 column,
+    kept the same width as the preview card. Colours follow the app theme."""
+    rows = "".join(
+        f"<tr><th>{html.escape(str(h))}</th><td>{html.escape(str(info.get(h, '')))}</td></tr>"
+        for h in headers
+    )
+    return (
+        "<style>"
+        ".vd-table{width:100%;max-width:560px;border-collapse:collapse;font-size:13px;line-height:1.25;}"
+        ".vd-table th,.vd-table td{border:1px solid rgba(128,128,128,0.45);padding:3px 8px;"
+        "text-align:left;vertical-align:top;word-break:break-word;}"
+        ".vd-table th{width:38%;font-weight:600;background:rgba(128,128,128,0.12);}"
+        "</style>"
+        f'<table class="vd-table"><tbody>{rows}</tbody></table>'
+    )
+
+
 @st.cache_data(show_spinner=False, ttl=60)
 def load_vehicle_all_columns():
     """Returns ({vehicle_no: {header: value, ...}}, [headers]) covering
@@ -1559,12 +1577,9 @@ elif phase == "🚙 Vehicle Details":
             ]
 
             if table_headers:
-                details_table = pd.DataFrame(
-                    {"Field": table_headers, "Value": [info.get(col_name, "") for col_name in table_headers]}
-                )
-                # A static table (not the scrolling grid) so every field is
-                # listed line by line, all visible at once.
-                st.table(details_table.set_index("Field"))
+                # A compact static table (not the scrolling grid) so every field
+                # is listed line by line, all visible at once.
+                st.markdown(build_details_table_html(table_headers, info), unsafe_allow_html=True)
 
             if model_col:
                 embed_src = extract_embed_src(info.get(model_col, ""))
