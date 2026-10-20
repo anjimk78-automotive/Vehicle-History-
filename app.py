@@ -1,6 +1,8 @@
+import base64
 import html
 import inspect
 import io
+import os
 import re
 import csv
 import time
@@ -514,6 +516,103 @@ def extract_embed_src(value):
     if value.startswith("http"):
         return value
     return None
+
+
+# -------------------------------------------------------------------------
+# Vehicle preview card (Vehicle Details)
+# -------------------------------------------------------------------------
+# Sheet2 column names (case-insensitive) used by the preview card. Each
+# picture cell can hold an image link (https://...), a Google Drive share link
+# (the file must be shared as "Anyone with the link"), or the path of an
+# image file kept in the app's GitHub repo (e.g. images/BJF 0588.jpg).
+_VEHICLE_IMAGE_COLUMN_NAMES = ("vehicle image", "vehicle photo", "vehicle picture", "image", "photo")
+_RIDER_IMAGE_COLUMN_NAMES = ("rider image", "rider photo", "rider picture")
+# Line shown at the bottom of the card; the first filled column is used.
+_MODEL_COLUMN_NAMES = ("vehicle model", "model", "brand")
+_IMAGE_FILE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                     ".gif": "image/gif", ".webp": "image/webp"}
+_MAX_REPO_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _field(info, names):
+    """First non-blank value among the given Sheet2 column names."""
+    lowered = {str(k).strip().lower(): v for k, v in info.items()}
+    for name in names:
+        value = str(lowered.get(name, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def image_src_from_cell(value):
+    """Turns a Sheet2 picture cell into something an <img> tag can show: a web
+    link, a Google Drive share link, or an image file kept in the app's repo.
+    Returns None when the cell is blank or can't be used."""
+    value = str(value).strip()
+    if not value:
+        return None
+    if value.lower().startswith(("http://", "https://")):
+        drive = (re.search(r"drive\.google\.com/file/d/([\w-]+)", value)
+                 or re.search(r"drive\.google\.com/\S*[?&]id=([\w-]+)", value))
+        if drive:
+            return f"https://drive.google.com/thumbnail?id={drive.group(1)}&sz=w1000"
+        return value
+    # A file inside the app's own folder (anything outside it is refused).
+    try:
+        base = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.realpath(os.path.join(base, value))
+        mime = _IMAGE_FILE_TYPES.get(os.path.splitext(path)[1].lower())
+        if (mime and os.path.commonpath([base, path]) == base and os.path.isfile(path)
+                and os.path.getsize(path) <= _MAX_REPO_IMAGE_BYTES):
+            with open(path, "rb") as fh:
+                return f"data:{mime};base64," + base64.b64encode(fh.read()).decode("ascii")
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def build_vehicle_card_html(vehicle_no, vehicle_src, rider_src, model_text):
+    """The preview card: Vehicle No on top, the vehicle picture on the left,
+    the rider picture with a 'Rider' label on the right, and the model line
+    underneath. A missing picture shows a grey 'No image' box."""
+    def pic(src, alt):
+        if src:
+            return f'<img src="{html.escape(src, quote=True)}" alt="{html.escape(alt)}" referrerpolicy="no-referrer">'
+        return '<div class="empty">No image</div>'
+
+    return f"""
+    <style>
+      body {{ margin: 0; font-family: Arial, Helvetica, sans-serif; background: transparent; }}
+      .card {{ max-width: 560px; border: 1px solid #000; background: #fff; color: #000; }}
+      .title {{ text-align: center; font-size: 18px; padding: 8px 6px; border-bottom: 1px solid #000; }}
+      .body {{ display: grid; grid-template-columns: 1.25fr 1fr; border-bottom: 1px solid #000; }}
+      .vehicle {{
+        height: 250px; box-sizing: border-box; padding: 6px; border-right: 1px solid #000;
+        display: flex; align-items: center; justify-content: center;
+      }}
+      .vehicle img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
+      .rider {{ height: 250px; display: flex; flex-direction: column; }}
+      .photo {{ flex: 1; min-height: 0; border-bottom: 1px solid #000; }}
+      .photo img {{ width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; }}
+      .label {{ flex: 0 0 40px; line-height: 40px; text-align: center; font-size: 18px; }}
+      .model {{ padding: 8px 6px; font-size: 18px; text-transform: uppercase; }}
+      .empty {{
+        width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+        background: #eee; color: #888; font-size: 14px;
+      }}
+    </style>
+    <div class="card">
+      <div class="title">{html.escape(str(vehicle_no))}</div>
+      <div class="body">
+        <div class="vehicle">{pic(vehicle_src, "Vehicle")}</div>
+        <div class="rider">
+          <div class="photo">{pic(rider_src, "Rider")}</div>
+          <div class="label">Rider</div>
+        </div>
+      </div>
+      <div class="model">{html.escape(str(model_text)) or "&nbsp;"}</div>
+    </div>
+    """
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -1429,6 +1528,18 @@ elif phase == "🚙 Vehicle Details":
         selected_vno = st.selectbox("Vehicle No", detail_options, key="details_vehicle_no")
         info = all_details.get(selected_vno, {})
 
+        # Preview card: Vehicle No, vehicle picture, rider picture and model,
+        # taken from the Vehicle Image / Rider Image / Model columns of Sheet2.
+        components.html(
+            build_vehicle_card_html(
+                selected_vno,
+                image_src_from_cell(_field(info, _VEHICLE_IMAGE_COLUMN_NAMES)),
+                image_src_from_cell(_field(info, _RIDER_IMAGE_COLUMN_NAMES)),
+                _field(info, _MODEL_COLUMN_NAMES),
+            ),
+            height=350,
+        )
+
         if not detail_headers:
             st.info("No additional columns found for this vehicle.")
         else:
@@ -1436,7 +1547,13 @@ elif phase == "🚙 Vehicle Details":
                 (h for h in detail_headers if h.strip().lower() in _3D_MODEL_COLUMN_NAMES),
                 None,
             )
-            table_headers = [h for h in detail_headers if h != model_col]
+            # The picture columns are shown on the preview card, so their long
+            # links are left out of the details table.
+            picture_cols = set(_VEHICLE_IMAGE_COLUMN_NAMES) | set(_RIDER_IMAGE_COLUMN_NAMES)
+            table_headers = [
+                h for h in detail_headers
+                if h != model_col and h.strip().lower() not in picture_cols
+            ]
 
             if table_headers:
                 details_table = pd.DataFrame(
