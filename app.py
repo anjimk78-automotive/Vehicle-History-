@@ -1562,7 +1562,9 @@ elif phase == "🚙 Vehicle Details":
                 details_table = pd.DataFrame(
                     {"Field": table_headers, "Value": [info.get(col_name, "") for col_name in table_headers]}
                 )
-                st.dataframe(details_table, use_container_width=True, hide_index=True)
+                # A static table (not the scrolling grid) so every field is
+                # listed line by line, all visible at once.
+                st.table(details_table.set_index("Field"))
 
             if model_col:
                 embed_src = extract_embed_src(info.get(model_col, ""))
