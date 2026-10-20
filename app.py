@@ -592,8 +592,11 @@ def build_vehicle_card_html(vehicle_no, vehicle_src, rider_src, model_text):
       }}
       .vehicle img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
       .rider {{ height: 250px; display: flex; flex-direction: column; }}
-      .photo {{ flex: 1; min-height: 0; border-bottom: 1px solid #000; }}
-      .photo img {{ width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; }}
+      .photo {{
+        flex: 1; min-height: 0; box-sizing: border-box; padding: 6px; border-bottom: 1px solid #000;
+        display: flex; align-items: center; justify-content: center;
+      }}
+      .photo img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}
       .label {{ flex: 0 0 40px; line-height: 40px; text-align: center; font-size: 18px; }}
       .model {{ padding: 8px 6px; font-size: 18px; text-transform: uppercase; }}
       .empty {{
