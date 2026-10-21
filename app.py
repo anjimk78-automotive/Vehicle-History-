@@ -84,10 +84,13 @@ def vehicle_part_options(event_type):
 # session). "Vehicle Part" is appended last so existing rows/columns never
 # shift position — the View page reorders columns for display separately
 # (see VIEW_DISPLAY_COLUMNS below) without touching this storage order.
+# "Edited Date" and "Edited By" are appended after that: they stay blank
+# until a record is changed from the Edit Entry section, which then fills in
+# when it was edited and which logged-in user edited it.
 COLUMN_ORDER = [
     "Timestamp", "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)",
     "Event Type", "Place", "Description of Goods / Service", "Cost", "User",
-    "Vehicle Part",
+    "Vehicle Part", "Edited Date", "Edited By",
 ]
 
 # Display-only column order for the View page and Vehicle Details' service
@@ -405,6 +408,25 @@ def load_data():
     except Exception as e:
         st.error(f"❌ Could not read data from the Google Sheet.\n\n{e}")
         return pd.DataFrame(columns=COLUMN_ORDER)
+
+
+def load_data_with_rows():
+    """Fresh (uncached) read of the history sheet that also returns each
+    record's physical sheet row number in a "_row" column — used by the Edit
+    Entry section so it updates exactly the row the user picked."""
+    ws = get_worksheet()
+    values = ws.get_all_values()
+    n = len(COLUMN_ORDER)
+    cols = COLUMN_ORDER + ["_row"]
+    if len(values) <= 1:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for i, row in enumerate(values[1:], start=2):
+        rows.append((row + [""] * n)[:n] + [i])
+    df = pd.DataFrame(rows, columns=cols)
+    for c in COLUMN_ORDER:
+        df[c] = df[c].astype(str).replace("nan", "")
+    return df
 
 
 def append_record(record: dict):
@@ -1407,6 +1429,151 @@ if phase == "📋 Record Entering":
                     time.sleep(1)
                     st.session_state["_items_key_version"] += 1
                     st.rerun()
+
+        # -----------------------------------------------------------------
+        # EDIT ENTRY — fix an entry that was entered by mistake. The record
+        # is updated in place in the Google Sheet; the original Timestamp,
+        # Vehicle No, Vehicle Type and User are kept, and the "Edited Date"
+        # and "Edited By" columns record when it was edited and by whom.
+        # -----------------------------------------------------------------
+        st.markdown("---")
+        st.markdown("#### ✏️ Edit Entry")
+        st.caption("Pick an entry that was entered by mistake and correct it. The sheet records the edited date and the user who edited it.")
+
+        edit_vno = st.selectbox("Vehicle No", vehicle_options, key="edit_vehicle_no")
+
+        try:
+            edit_all_df = load_data_with_rows()
+        except Exception as e:
+            edit_all_df = pd.DataFrame(columns=COLUMN_ORDER + ["_row"])
+            st.error(f"❌ Could not read data from the Google Sheet.\n\n{e}")
+
+        edit_df = edit_all_df[edit_all_df["Vehicle No"] == edit_vno]
+
+        if edit_df.empty:
+            st.info("No entries recorded for this vehicle yet.")
+        else:
+            edit_df = edit_df.sort_values(["Date", "Timestamp"], ascending=[False, False])
+            edit_labels = {
+                int(r["_row"]): (
+                    f"{r['Date']} | {r['Event Type']} | {r['Vehicle Part']} | "
+                    f"{r['Description of Goods / Service']} | {r['Cost']}"
+                )
+                for _, r in edit_df.iterrows()
+            }
+            edit_row_no = st.selectbox(
+                "Select entry to edit",
+                list(edit_labels.keys()),
+                format_func=lambda k: edit_labels[k],
+                key=f"edit_row_select_{edit_vno}",
+            )
+            sel = edit_df[edit_df["_row"] == edit_row_no].iloc[0]
+
+            # Event Type sits outside the form so the Vehicle Part options
+            # below update live when it changes.
+            edit_event_options = list(EVENT_TYPES)
+            if sel["Event Type"] and sel["Event Type"] not in edit_event_options:
+                edit_event_options.append(sel["Event Type"])
+            edit_event_default = edit_event_options.index(sel["Event Type"]) if sel["Event Type"] in edit_event_options else 0
+            edit_event_type = st.selectbox(
+                "Event Type",
+                edit_event_options,
+                index=edit_event_default,
+                key=f"edit_event_type_{edit_row_no}",
+            )
+
+            edit_part_options = list(vehicle_part_options(edit_event_type))
+            if sel["Vehicle Part"] and sel["Vehicle Part"] not in edit_part_options and edit_event_type == sel["Event Type"]:
+                edit_part_options.append(sel["Vehicle Part"])
+            edit_part_default = edit_part_options.index(sel["Vehicle Part"]) if sel["Vehicle Part"] in edit_part_options else 0
+
+            parsed_date = pd.to_datetime(sel["Date"], errors="coerce")
+            edit_date_default = parsed_date.date() if pd.notna(parsed_date) else date.today()
+
+            with st.form("edit_entry_form", clear_on_submit=False):
+                e1, e2 = st.columns(2)
+                with e1:
+                    edit_date = st.date_input("Date *", value=edit_date_default, key=f"edit_date_{edit_row_no}")
+                    edit_mileage = st.text_input(
+                        "Mileage (KM) *", value=sel["Mileage (KM)"], key=f"edit_mileage_{edit_row_no}",
+                        placeholder="e.g. 15000 or NA",
+                    )
+                    edit_part = st.selectbox(
+                        "Vehicle Part", edit_part_options, index=edit_part_default,
+                        key=f"edit_part_{edit_row_no}_{edit_event_type}",
+                    )
+                with e2:
+                    edit_place = st.text_input("Place *", value=sel["Place"], key=f"edit_place_{edit_row_no}")
+                    edit_desc = st.text_input(
+                        "Description of Goods / Service *", value=sel["Description of Goods / Service"],
+                        key=f"edit_desc_{edit_row_no}",
+                    )
+                    edit_cost = st.number_input(
+                        "Cost *", value=float(to_number(sel["Cost"])), step=0.01, format="%.2f",
+                        key=f"edit_cost_{edit_row_no}",
+                    )
+
+                if sel["Edited Date"] or sel["Edited By"]:
+                    st.caption(f"Last edited: {sel['Edited Date']} by {sel['Edited By']}")
+
+                edit_submitted = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                if edit_submitted:
+                    edit_errors = []
+                    edit_mileage_value = ""
+                    edit_mileage_str = edit_mileage.strip()
+                    if not edit_place.strip():
+                        edit_errors.append("Place is required.")
+                    if not edit_desc.strip():
+                        edit_errors.append("Description of Goods / Service is required.")
+                    if not edit_mileage_str:
+                        edit_errors.append("Mileage (KM) is required.")
+                    elif edit_mileage_str.upper() == "NA":
+                        edit_mileage_value = "NA"
+                    else:
+                        try:
+                            as_float = float(edit_mileage_str)
+                            if as_float < 0:
+                                edit_errors.append("Mileage (KM) must be a positive number or 'NA'.")
+                            else:
+                                edit_mileage_value = int(as_float) if as_float == int(as_float) else as_float
+                        except ValueError:
+                            edit_errors.append("Mileage (KM) must be a number or 'NA'.")
+
+                    if edit_errors:
+                        for err in edit_errors:
+                            st.error(f"❌ {err}")
+                    else:
+                        try:
+                            ws = get_worksheet()
+                            n_cols = len(COLUMN_ORDER)
+                            current_row = (ws.row_values(int(edit_row_no)) + [""] * n_cols)[:n_cols]
+                            if current_row[0] != sel["Timestamp"]:
+                                st.error("❌ This entry changed in the sheet since it was loaded. Press Refresh and try again.")
+                            else:
+                                updated = dict(zip(COLUMN_ORDER, current_row))
+                                updated.update({
+                                    "Date": edit_date.isoformat(),
+                                    "Mileage (KM)": edit_mileage_value,
+                                    "Event Type": edit_event_type,
+                                    "Place": edit_place.strip(),
+                                    "Description of Goods / Service": edit_desc.strip(),
+                                    "Cost": edit_cost,
+                                    "Vehicle Part": edit_part,
+                                    "Edited Date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Edited By": st.session_state["username"],
+                                })
+                                new_row = [str(updated.get(c, "")) for c in COLUMN_ORDER]
+                                ws.update(
+                                    range_name=f"A{int(edit_row_no)}",
+                                    values=[new_row],
+                                    value_input_option="USER_ENTERED",
+                                )
+                                _load_data_cached.clear()
+                                st.success(f"✅ Entry updated for Vehicle No {edit_vno}.")
+                                time.sleep(1)
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Could not update the entry.\n\n{e}")
 
 # =========================================================================
 # PHASE 2 — VIEW
