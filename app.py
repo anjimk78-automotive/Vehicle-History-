@@ -87,17 +87,21 @@ def vehicle_part_options(event_type):
 # "Edited Date" and "Edited By" are appended after that: they stay blank
 # until a record is changed from the Edit Entry section, which then fills in
 # when it was edited and which logged-in user edited it.
+# "Record ID" is the very last column: every entry gets one automatically
+# (R0001, R0002, ...) and the Edit Entry section selects records by it.
 COLUMN_ORDER = [
     "Timestamp", "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)",
     "Event Type", "Place", "Description of Goods / Service", "Cost", "User",
-    "Vehicle Part", "Edited Date", "Edited By",
+    "Vehicle Part", "Edited Date", "Edited By", "Record ID",
 ]
+RECORD_ID_COL = COLUMN_ORDER.index("Record ID")  # 0-based position in the sheet
 
 # Display-only column order for the View page and Vehicle Details' service
 # history — Vehicle Part shows as the 6th column here (right after Event
-# Type) even though it's stored as the last column in the sheet.
+# Type) even though it's stored as the last column in the sheet. Record ID
+# is shown first on the View page.
 VIEW_DISPLAY_COLUMNS = [
-    "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)", "Event Type",
+    "Record ID", "Vehicle No", "Vehicle Type", "Date", "Mileage (KM)", "Event Type",
     "Vehicle Part", "Place", "Description of Goods / Service", "Cost", "User",
 ]
 
@@ -384,6 +388,59 @@ def clear_data_caches():
     load_mileage_log.clear()
 
 
+# -------------------------------------------------------------------------
+# Record IDs
+# -------------------------------------------------------------------------
+def _record_id_number(value):
+    """Numeric part of a Record ID such as 'R0042' (0 if there isn't one)."""
+    match = re.search(r"(\d+)\s*$", str(value))
+    return int(match.group(1)) if match else 0
+
+
+def _format_record_id(number):
+    return f"R{number:04d}"
+
+
+def next_record_ids(count):
+    """The next `count` Record IDs, continuing after the highest one already
+    in the sheet's Record ID column."""
+    ws = get_worksheet()
+    existing = ws.col_values(RECORD_ID_COL + 1)[1:]
+    highest = max([_record_id_number(v) for v in existing] or [0])
+    return [_format_record_id(highest + i + 1) for i in range(count)]
+
+
+@st.cache_resource(show_spinner=False)
+def backfill_record_ids():
+    """One-time fix-up: gives a Record ID to every existing row that doesn't
+    have one yet (in sheet order, continuing after the highest ID), so older
+    entries can be selected in Edit Entry too. Runs once per app process."""
+    ws = get_worksheet()
+    values = ws.get_all_values()
+    if len(values) <= 1:
+        return 0
+    data_rows = values[1:]
+    ids = [(row[RECORD_ID_COL].strip() if len(row) > RECORD_ID_COL else "") for row in data_rows]
+    missing = [
+        i for i, row in enumerate(data_rows)
+        if not ids[i] and any(str(cell).strip() for cell in row)
+    ]
+    if not missing:
+        return 0
+    highest = max([_record_id_number(v) for v in ids] or [0])
+    for i in missing:
+        highest += 1
+        ids[i] = _format_record_id(highest)
+    col_letter = re.sub(r"\d+", "", gspread.utils.rowcol_to_a1(1, RECORD_ID_COL + 1))
+    ws.update(
+        range_name=f"{col_letter}2:{col_letter}{len(ids) + 1}",
+        values=[[v] for v in ids],
+        value_input_option="USER_ENTERED",
+    )
+    _load_data_cached.clear()
+    return len(missing)
+
+
 @st.cache_data(show_spinner=False, ttl=20)
 def _load_data_cached(sheet_id):
     ws = get_worksheet()
@@ -431,6 +488,9 @@ def load_data_with_rows():
 
 def append_record(record: dict):
     ws = get_worksheet()
+    record = dict(record)
+    if not str(record.get("Record ID", "")).strip():
+        record["Record ID"] = next_record_ids(1)[0]
     row = [str(record.get(c, "")) for c in COLUMN_ORDER]
     ws.append_row(row, value_input_option="USER_ENTERED")
     _load_data_cached.clear()
@@ -439,9 +499,15 @@ def append_record(record: dict):
 def append_records(records: list):
     """Batch version of append_record — used to save several Description/Cost
     line items from the same entry (same Vehicle No, Date, Mileage, Place)
-    as separate sheet rows in a single API call."""
+    as separate sheet rows in a single API call. Each row gets its own
+    automatically generated Record ID."""
     ws = get_worksheet()
-    rows = [[str(r.get(c, "")) for c in COLUMN_ORDER] for r in records]
+    new_ids = next_record_ids(len(records))
+    rows = []
+    for rec, rid in zip(records, new_ids):
+        rec = dict(rec)
+        rec["Record ID"] = rid
+        rows.append([str(rec.get(c, "")) for c in COLUMN_ORDER])
     ws.append_rows(rows, value_input_option="USER_ENTERED")
     _load_data_cached.clear()
 
@@ -1260,6 +1326,12 @@ except Exception as e:
     st.error(f"❌ Could not connect to the Google Sheet. Check your secrets and sharing settings.\n\n{e}")
     st.stop()
 
+# Give every existing record without a Record ID one (runs once per app start).
+try:
+    backfill_record_ids()
+except Exception as e:
+    st.warning(f"⚠️ Could not add Record IDs to existing records.\n\n{e}")
+
 try:
     vehicle_details = load_vehicle_details()
 except Exception as e:
@@ -1431,16 +1503,15 @@ if phase == "📋 Record Entering":
                     st.rerun()
 
         # -----------------------------------------------------------------
-        # EDIT ENTRY — fix an entry that was entered by mistake. The record
-        # is updated in place in the Google Sheet; the original Timestamp,
-        # Vehicle No, Vehicle Type and User are kept, and the "Edited Date"
-        # and "Edited By" columns record when it was edited and by whom.
+        # EDIT ENTRY — fix an entry that was entered by mistake. Pick the
+        # record by its Record ID; it is updated in place in the Google
+        # Sheet. The original Timestamp, Vehicle No, Vehicle Type, User and
+        # Record ID are kept, and the "Edited Date" and "Edited By" columns
+        # record when it was edited and by whom.
         # -----------------------------------------------------------------
         st.markdown("---")
         st.markdown("#### ✏️ Edit Entry")
-        st.caption("Pick an entry that was entered by mistake and correct it. The sheet records the edited date and the user who edited it.")
-
-        edit_vno = st.selectbox("Vehicle No", vehicle_options, key="edit_vehicle_no")
+        st.caption("Select a Record ID, correct the entry and save. The sheet records the edited date and the user who edited it.")
 
         try:
             edit_all_df = load_data_with_rows()
@@ -1448,26 +1519,30 @@ if phase == "📋 Record Entering":
             edit_all_df = pd.DataFrame(columns=COLUMN_ORDER + ["_row"])
             st.error(f"❌ Could not read data from the Google Sheet.\n\n{e}")
 
-        edit_df = edit_all_df[edit_all_df["Vehicle No"] == edit_vno]
+        edit_df = edit_all_df[edit_all_df["Record ID"].str.strip() != ""]
 
         if edit_df.empty:
-            st.info("No entries recorded for this vehicle yet.")
+            st.info("No records with a Record ID yet.")
         else:
-            edit_df = edit_df.sort_values(["Date", "Timestamp"], ascending=[False, False])
+            edit_df = edit_df.assign(_idnum=edit_df["Record ID"].map(_record_id_number))
+            edit_df = edit_df.sort_values("_idnum", ascending=False)
             edit_labels = {
-                int(r["_row"]): (
-                    f"{r['Date']} | {r['Event Type']} | {r['Vehicle Part']} | "
+                r["Record ID"]: (
+                    f"{r['Record ID']} | {r['Vehicle No']} | {r['Date']} | "
                     f"{r['Description of Goods / Service']} | {r['Cost']}"
                 )
                 for _, r in edit_df.iterrows()
             }
-            edit_row_no = st.selectbox(
-                "Select entry to edit",
+            edit_record_id = st.selectbox(
+                "Record ID",
                 list(edit_labels.keys()),
                 format_func=lambda k: edit_labels[k],
-                key=f"edit_row_select_{edit_vno}",
+                key="edit_record_id",
             )
-            sel = edit_df[edit_df["_row"] == edit_row_no].iloc[0]
+            sel = edit_df[edit_df["Record ID"] == edit_record_id].iloc[0]
+            edit_row_no = int(sel["_row"])
+
+            st.caption(f"Vehicle No: {sel['Vehicle No']} ({sel['Vehicle Type']})")
 
             # Event Type sits outside the form so the Vehicle Part options
             # below update live when it changes.
@@ -1479,7 +1554,7 @@ if phase == "📋 Record Entering":
                 "Event Type",
                 edit_event_options,
                 index=edit_event_default,
-                key=f"edit_event_type_{edit_row_no}",
+                key=f"edit_event_type_{edit_record_id}",
             )
 
             edit_part_options = list(vehicle_part_options(edit_event_type))
@@ -1493,24 +1568,24 @@ if phase == "📋 Record Entering":
             with st.form("edit_entry_form", clear_on_submit=False):
                 e1, e2 = st.columns(2)
                 with e1:
-                    edit_date = st.date_input("Date *", value=edit_date_default, key=f"edit_date_{edit_row_no}")
+                    edit_date = st.date_input("Date *", value=edit_date_default, key=f"edit_date_{edit_record_id}")
                     edit_mileage = st.text_input(
-                        "Mileage (KM) *", value=sel["Mileage (KM)"], key=f"edit_mileage_{edit_row_no}",
+                        "Mileage (KM) *", value=sel["Mileage (KM)"], key=f"edit_mileage_{edit_record_id}",
                         placeholder="e.g. 15000 or NA",
                     )
                     edit_part = st.selectbox(
                         "Vehicle Part", edit_part_options, index=edit_part_default,
-                        key=f"edit_part_{edit_row_no}_{edit_event_type}",
+                        key=f"edit_part_{edit_record_id}_{edit_event_type}",
                     )
                 with e2:
-                    edit_place = st.text_input("Place *", value=sel["Place"], key=f"edit_place_{edit_row_no}")
+                    edit_place = st.text_input("Place *", value=sel["Place"], key=f"edit_place_{edit_record_id}")
                     edit_desc = st.text_input(
                         "Description of Goods / Service *", value=sel["Description of Goods / Service"],
-                        key=f"edit_desc_{edit_row_no}",
+                        key=f"edit_desc_{edit_record_id}",
                     )
                     edit_cost = st.number_input(
                         "Cost *", value=float(to_number(sel["Cost"])), step=0.01, format="%.2f",
-                        key=f"edit_cost_{edit_row_no}",
+                        key=f"edit_cost_{edit_record_id}",
                     )
 
                 if sel["Edited Date"] or sel["Edited By"]:
@@ -1546,9 +1621,9 @@ if phase == "📋 Record Entering":
                         try:
                             ws = get_worksheet()
                             n_cols = len(COLUMN_ORDER)
-                            current_row = (ws.row_values(int(edit_row_no)) + [""] * n_cols)[:n_cols]
-                            if current_row[0] != sel["Timestamp"]:
-                                st.error("❌ This entry changed in the sheet since it was loaded. Press Refresh and try again.")
+                            current_row = (ws.row_values(edit_row_no) + [""] * n_cols)[:n_cols]
+                            if current_row[RECORD_ID_COL] != edit_record_id:
+                                st.error("❌ This record changed in the sheet since it was loaded. Press Refresh and try again.")
                             else:
                                 updated = dict(zip(COLUMN_ORDER, current_row))
                                 updated.update({
@@ -1564,16 +1639,16 @@ if phase == "📋 Record Entering":
                                 })
                                 new_row = [str(updated.get(c, "")) for c in COLUMN_ORDER]
                                 ws.update(
-                                    range_name=f"A{int(edit_row_no)}",
+                                    range_name=f"A{edit_row_no}",
                                     values=[new_row],
                                     value_input_option="USER_ENTERED",
                                 )
                                 _load_data_cached.clear()
-                                st.success(f"✅ Entry updated for Vehicle No {edit_vno}.")
+                                st.success(f"✅ Record {edit_record_id} updated.")
                                 time.sleep(1)
                                 st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Could not update the entry.\n\n{e}")
+                            st.error(f"❌ Could not update the record.\n\n{e}")
 
 # =========================================================================
 # PHASE 2 — VIEW
@@ -1606,7 +1681,7 @@ elif phase == "📊 View":
 
         search_text = st.text_input(
             "🔍 Search",
-            placeholder="Search anything: vehicle no, place, description, part, user, date...",
+            placeholder="Search anything: record id, vehicle no, place, description, part, user, date...",
             key="view_search",
         )
 
@@ -1765,7 +1840,7 @@ elif phase == "🚙 Vehicle Details":
         if vehicle_history.empty:
             st.info("No service history recorded for this vehicle yet.")
         else:
-            history_display_cols = [c for c in VIEW_DISPLAY_COLUMNS if c != "Vehicle No"]
+            history_display_cols = [c for c in VIEW_DISPLAY_COLUMNS if c not in ("Vehicle No", "Record ID")]
             st.dataframe(vehicle_history[history_display_cols], use_container_width=True, hide_index=True)
 
             vehicle_total = sum(to_number(c) for c in vehicle_history["Cost"])
