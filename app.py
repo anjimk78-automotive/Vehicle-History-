@@ -1526,17 +1526,9 @@ if phase == "📋 Record Entering":
         else:
             edit_df = edit_df.assign(_idnum=edit_df["Record ID"].map(_record_id_number))
             edit_df = edit_df.sort_values("_idnum", ascending=False)
-            edit_labels = {
-                r["Record ID"]: (
-                    f"{r['Record ID']} | {r['Vehicle No']} | {r['Date']} | "
-                    f"{r['Description of Goods / Service']} | {r['Cost']}"
-                )
-                for _, r in edit_df.iterrows()
-            }
             edit_record_id = st.selectbox(
                 "Record ID",
-                list(edit_labels.keys()),
-                format_func=lambda k: edit_labels[k],
+                edit_df["Record ID"].tolist(),
                 key="edit_record_id",
             )
             sel = edit_df[edit_df["Record ID"] == edit_record_id].iloc[0]
