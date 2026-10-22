@@ -185,202 +185,6 @@ def inject_base_style():
     """, unsafe_allow_html=True)
 
 
-def inject_sidebar_style():
-    """Professional dark sidebar: brand header, user card, section labels,
-    navigation list with an accent bar on the active item, and styled
-    action buttons. Every rule is scoped to the sidebar so the rest of the
-    app is not affected."""
-    st.markdown("""
-    <style>
-    /* ---- Sidebar container ---- */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #111827 0%, #1f2937 100%) !important;
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    section[data-testid="stSidebar"] > div {
-        background: transparent !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-        padding-top: 0.5rem;
-    }
-    section[data-testid="stSidebar"] hr {
-        border: none !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.10) !important;
-        margin: 0.9rem 0 !important;
-    }
-    [data-testid="stSidebarCollapseButton"] button,
-    [data-testid="stSidebarCollapseButton"] svg,
-    [data-testid="stSidebarCollapsedControl"] button {
-        color: #e5e7eb !important;
-    }
-
-    /* ---- Brand header ---- */
-    .sb-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.4rem 0.2rem 0.2rem 0.2rem;
-    }
-    .sb-logo {
-        flex: 0 0 auto;
-        width: 2.6rem;
-        height: 2.6rem;
-        border-radius: 0.75rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.35rem;
-        background: linear-gradient(135deg, #e63946 0%, #c1121f 100%);
-        box-shadow: 0 4px 14px rgba(230, 57, 70, 0.45);
-    }
-    .sb-title {
-        color: #ffffff;
-        font-weight: 800;
-        font-size: 1.02rem;
-        line-height: 1.2;
-        letter-spacing: 0.2px;
-    }
-    .sb-sub {
-        color: #9ca3af;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        margin-top: 2px;
-    }
-
-    /* ---- Section labels ---- */
-    .sb-section {
-        color: #9ca3af;
-        font-size: 0.68rem;
-        font-weight: 700;
-        letter-spacing: 1.2px;
-        text-transform: uppercase;
-        margin: 0.2rem 0 0.5rem 0.2rem;
-    }
-
-    /* ---- User card ---- */
-    .sb-user {
-        display: flex;
-        align-items: center;
-        gap: 0.7rem;
-        padding: 0.65rem 0.75rem;
-        border-radius: 0.75rem;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.10);
-        margin-bottom: 0.6rem;
-    }
-    .sb-avatar {
-        flex: 0 0 auto;
-        width: 2.2rem;
-        height: 2.2rem;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #ffffff;
-        font-weight: 800;
-        font-size: 0.95rem;
-        background: linear-gradient(135deg, #e63946 0%, #c1121f 100%);
-    }
-    .sb-user-info { min-width: 0; }
-    .sb-user-name {
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 0.92rem;
-        line-height: 1.2;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .sb-user-status {
-        color: #9ca3af;
-        font-size: 0.72rem;
-        font-weight: 600;
-        margin-top: 2px;
-    }
-    .sb-dot {
-        display: inline-block;
-        width: 0.45rem;
-        height: 0.45rem;
-        border-radius: 50%;
-        background: #22c55e;
-        margin-right: 0.35rem;
-        vertical-align: middle;
-    }
-
-    /* ---- Sidebar buttons (Log out / Refresh) ---- */
-    section[data-testid="stSidebar"] .stButton > button {
-        width: 100%;
-        background: rgba(255, 255, 255, 0.06) !important;
-        color: #f3f4f6 !important;
-        border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        border-radius: 0.65rem !important;
-        font-weight: 600 !important;
-        padding: 0.5rem 0.8rem !important;
-        transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-    }
-    section[data-testid="stSidebar"] .stButton > button p {
-        color: #f3f4f6 !important;
-        font-weight: 600 !important;
-    }
-    section[data-testid="stSidebar"] .stButton > button:hover {
-        background: #e63946 !important;
-        border-color: #e63946 !important;
-        transform: translateY(-1px);
-    }
-    section[data-testid="stSidebar"] .stButton > button:hover p {
-        color: #ffffff !important;
-    }
-
-    /* ---- Navigation (the Sections radio) ---- */
-    section[data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] {
-        gap: 0.3rem;
-    }
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label {
-        width: 100%;
-        margin: 0 !important;
-        padding: 0.62rem 0.85rem;
-        border-radius: 0.65rem;
-        border-left: 3px solid transparent;
-        background: transparent;
-        cursor: pointer;
-        transition: background 0.15s ease, border-color 0.15s ease;
-    }
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
-        background: rgba(255, 255, 255, 0.07);
-    }
-    /* hide the round radio indicator — the highlight shows the selection */
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-of-type {
-        display: none !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label p {
-        color: #cbd5e1 !important;
-        font-size: 0.95rem;
-        font-weight: 500;
-        margin: 0;
-    }
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
-        background: rgba(230, 57, 70, 0.18);
-        border-left-color: #e63946;
-    }
-    section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) p {
-        color: #ffffff !important;
-        font-weight: 700;
-    }
-
-    /* ---- Footer ---- */
-    .sb-footer {
-        color: #6b7280;
-        font-size: 0.7rem;
-        text-align: center;
-        line-height: 1.5;
-        padding: 0.2rem 0 0.4rem 0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-
 def inject_login_style():
     st.markdown(f"""
     <style>
@@ -1465,42 +1269,15 @@ if not st.session_state["authenticated"]:
 # MAIN APP (authenticated)
 # =========================================================================
 inject_base_style()
-inject_sidebar_style()
 
 st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
 
-# Sidebar: brand header, the signed-in user card and the Log out button.
-# (The Refresh button and the navigation list are added to the sidebar
-# further down, once the setup checks have passed.)
+# Sidebar: the signed-in user and the Log out button. (The Refresh button and
+# the section list are added to the sidebar further down, once the setup
+# checks have passed.)
 with st.sidebar:
-    st.markdown(
-        """
-        <div class="sb-brand">
-            <div class="sb-logo">🚗</div>
-            <div>
-                <div class="sb-title">Vehicle History</div>
-                <div class="sb-sub">Monitoring System · KMN</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("---")
-    st.markdown('<div class="sb-section">Account</div>', unsafe_allow_html=True)
-    _sb_username = st.session_state["username"] or "User"
-    st.markdown(
-        f"""
-        <div class="sb-user">
-            <div class="sb-avatar">{html.escape(_sb_username[:1].upper())}</div>
-            <div class="sb-user-info">
-                <div class="sb-user-name">{html.escape(_sb_username)}</div>
-                <div class="sb-user-status"><span class="sb-dot"></span>Signed in</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    if st.button("🚪 Log out", use_container_width=True, key="sidebar_logout"):
+    st.write(f"👤 {st.session_state['username']}")
+    if st.button("Log out", use_container_width=True, key="sidebar_logout"):
         st.session_state["authenticated"] = False
         st.session_state["username"] = ""
         st.rerun()
@@ -1570,24 +1347,15 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # PHASE SELECTOR
 # =========================================================================
 with st.sidebar:
-    st.markdown("---")
-    st.markdown('<div class="sb-section">Tools</div>', unsafe_allow_html=True)
     # One Refresh for the whole app: clears every cached read so the next
     # load fetches fresh data from the Google Sheet.
-    if st.button("🔄 Refresh data", use_container_width=True, key="sidebar_refresh"):
+    if st.button("🔄 Refresh", use_container_width=True, key="sidebar_refresh"):
         clear_data_caches()
         st.rerun()
     st.markdown("---")
-    st.markdown('<div class="sb-section">Navigation</div>', unsafe_allow_html=True)
     phase = st.radio(
         "Sections",
         ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
-        label_visibility="collapsed",
-    )
-    st.markdown("---")
-    st.markdown(
-        '<div class="sb-footer">Vehicle History Monitoring System<br>KMN</div>',
-        unsafe_allow_html=True,
     )
 st.markdown("---")
 
