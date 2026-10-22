@@ -194,7 +194,13 @@ def inject_sidebar_style():
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0b2545 0%, #13315c 100%);
     }
-    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+    [data-testid="stSidebar"] > div:first-child {
+        padding-top: 1.2rem;
+        background: transparent !important;
+    }
+    [data-testid="stSidebarContent"], [data-testid="stSidebarUserContent"] {
+        background: transparent !important;
+    }
     [data-testid="stSidebar"] .nav-brand {
         padding: 4px 6px 14px 6px;
         margin-bottom: 6px;
@@ -219,7 +225,8 @@ def inject_sidebar_style():
         transition: background 0.15s ease;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-of-type { display: none !important; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label * { color: #dbe7f3 !important; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) * { color: #ffffff !important; }
     [data-testid="stSidebar"] [data-testid="stRadio"] label p {
         color: #dbe7f3 !important; font-size: 0.92rem; font-weight: 500; margin: 0;
     }
