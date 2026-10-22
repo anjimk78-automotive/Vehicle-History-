@@ -185,6 +185,120 @@ def inject_base_style():
     """, unsafe_allow_html=True)
 
 
+def inject_sidebar_style():
+    """Navy sidebar with a branded header, grouped menu buttons (the active
+    page is highlighted), an account card and a footer. Every rule is scoped
+    to the sidebar so the rest of the app is not affected."""
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0b2545 0%, #13315c 100%);
+    }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+    [data-testid="stSidebar"] .nav-brand {
+        padding: 4px 6px 14px 6px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid rgba(255,255,255,0.18);
+    }
+    [data-testid="stSidebar"] .nav-brand-title {
+        color: #ffffff; font-size: 1.25rem; font-weight: 700; letter-spacing: .3px; line-height: 1.2;
+    }
+    [data-testid="stSidebar"] .nav-brand-sub {
+        color: #8da9c4; font-size: 0.78rem; margin-top: 3px; letter-spacing: .4px;
+    }
+    [data-testid="stSidebar"] .nav-group {
+        color: #8da9c4; font-size: 0.70rem; font-weight: 700; letter-spacing: 1.2px;
+        text-transform: uppercase; margin: 16px 0 6px 6px;
+    }
+    [data-testid="stSidebar"] .nav-spacer { height: 10px; }
+    /* Sections list (radio) styled as a menu */
+    [data-testid="stSidebar"] [data-testid="stRadio"] > div[role="radiogroup"] { gap: 0.3rem; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label {
+        width: 100%; margin: 0 !important; padding: 0.55rem 0.85rem;
+        border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+        transition: background 0.15s ease;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-of-type { display: none !important; }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label p {
+        color: #dbe7f3 !important; font-size: 0.92rem; font-weight: 500; margin: 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
+        background: #1f77d0; border: 1px solid #4a97e3;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) p {
+        color: #ffffff !important; font-weight: 600;
+    }
+    [data-testid="stSidebar"] .stButton { margin-bottom: -6px; }
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100%;
+        justify-content: flex-start;
+        text-align: left;
+        background: transparent !important;
+        border: 1px solid transparent !important;
+        border-radius: 8px;
+        padding: 0.45rem 0.8rem;
+        color: #dbe7f3 !important;
+        font-weight: 500;
+        box-shadow: none;
+    }
+    [data-testid="stSidebar"] .stButton > button p,
+    [data-testid="stSidebar"] .stButton > button div {
+        color: #dbe7f3 !important; text-align: left; font-size: 0.92rem;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,255,255,0.10) !important;
+        border: 1px solid rgba(255,255,255,0.18) !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: #1f77d0 !important;
+        border: 1px solid #4a97e3 !important;
+        color: #ffffff !important;
+        font-weight: 600;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+        background: #1a68b8 !important;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] p,
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] div {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebar"] .nav-user {
+        display: flex; align-items: center; gap: 0.7rem;
+        padding: 0.6rem 0.7rem; margin: 2px 0 8px 0;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.07);
+        border: 1px solid rgba(255,255,255,0.14);
+    }
+    [data-testid="stSidebar"] .nav-avatar {
+        flex: 0 0 auto; width: 2.1rem; height: 2.1rem; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: #1f77d0; color: #ffffff; font-weight: 800; font-size: 0.95rem;
+    }
+    [data-testid="stSidebar"] .nav-user-name {
+        color: #ffffff; font-weight: 700; font-size: 0.9rem; line-height: 1.2;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    [data-testid="stSidebar"] .nav-user-status {
+        color: #8da9c4; font-size: 0.72rem; margin-top: 2px;
+    }
+    [data-testid="stSidebar"] .nav-dot {
+        display: inline-block; width: 0.45rem; height: 0.45rem; border-radius: 50%;
+        background: #22c55e; margin-right: 0.35rem; vertical-align: middle;
+    }
+    [data-testid="stSidebar"] .nav-footer {
+        color: #8da9c4; font-size: 0.72rem; margin-top: 22px; padding: 10px 6px 0 6px;
+        border-top: 1px solid rgba(255,255,255,0.18); line-height: 1.5;
+    }
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stSidebarCollapseButton"] svg,
+    [data-testid="stSidebarCollapsedControl"] button {
+        color: #e5e7eb !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 def inject_login_style():
     st.markdown(f"""
     <style>
@@ -1269,18 +1383,48 @@ if not st.session_state["authenticated"]:
 # MAIN APP (authenticated)
 # =========================================================================
 inject_base_style()
+inject_sidebar_style()
 
 st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System - KMN</h1>", unsafe_allow_html=True)
 
-# Sidebar: the signed-in user and the Log out button. (The Refresh button and
-# the section list are added to the sidebar further down, once the setup
-# checks have passed.)
+# Sidebar: branded header, the same Sections list as before (styled only),
+# Refresh, the signed-in user card with Log out, and a footer.
 with st.sidebar:
-    st.write(f"👤 {st.session_state['username']}")
-    if st.button("Log out", use_container_width=True, key="sidebar_logout"):
+    st.markdown(
+        "<div class='nav-brand'>"
+        "<div class='nav-brand-title'>Vehicle History</div>"
+        "<div class='nav-brand-sub'>KMN &middot; Monitoring System</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    phase = st.radio(
+        "Sections",
+        ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
+        label_visibility="collapsed",
+    )
+    st.markdown("<div class='nav-spacer'></div>", unsafe_allow_html=True)
+    # One Refresh for the whole app: clears every cached read so the next
+    # load fetches fresh data from the Google Sheet.
+    if st.button("🔄 Refresh data", use_container_width=True, key="sidebar_refresh"):
+        clear_data_caches()
+        st.rerun()
+    _sb_username = st.session_state["username"] or "User"
+    st.markdown(
+        f"<div class='nav-user'>"
+        f"<div class='nav-avatar'>{html.escape(_sb_username[:1].upper())}</div>"
+        f"<div><div class='nav-user-name'>{html.escape(_sb_username)}</div>"
+        f"<div class='nav-user-status'><span class='nav-dot'></span>Signed in</div></div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    if st.button("🚪 Log out", use_container_width=True, key="sidebar_logout"):
         st.session_state["authenticated"] = False
         st.session_state["username"] = ""
         st.rerun()
+    st.markdown(
+        f"<div class='nav-footer'>Data as of {date.today().strftime('%d %b %Y')}<br>Vehicle History Monitoring System</div>",
+        unsafe_allow_html=True,
+    )
 st.markdown("---")
 
 # =========================================================================
@@ -1342,22 +1486,6 @@ except Exception as e:
     )
 
 vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_details.items()}
-
-# =========================================================================
-# PHASE SELECTOR
-# =========================================================================
-with st.sidebar:
-    # One Refresh for the whole app: clears every cached read so the next
-    # load fetches fresh data from the Google Sheet.
-    if st.button("🔄 Refresh", use_container_width=True, key="sidebar_refresh"):
-        clear_data_caches()
-        st.rerun()
-    st.markdown("---")
-    phase = st.radio(
-        "Sections",
-        ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
-    )
-st.markdown("---")
 
 # =========================================================================
 # PHASE 1 — RECORD ENTERING
