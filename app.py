@@ -201,6 +201,13 @@ def inject_sidebar_style():
     [data-testid="stSidebarContent"], [data-testid="stSidebarUserContent"] {
         background: transparent !important;
     }
+    [data-testid="stSidebar"] .nav-logo {
+        display: flex; justify-content: center; align-items: center;
+        padding: 2px 0 10px 0;
+    }
+    [data-testid="stSidebar"] .nav-logo img {
+        max-width: 70%; max-height: 90px; height: auto; object-fit: contain;
+    }
     [data-testid="stSidebar"] .nav-brand {
         padding: 4px 6px 14px 6px;
         margin-bottom: 6px;
@@ -1396,8 +1403,19 @@ st.markdown("<h1 style='text-align: center;'>Vehicle History Monitoring System -
 
 # Sidebar: branded header, the same Sections list as before (styled only),
 # Refresh, the signed-in user card with Log out, and a footer.
+# Logo shown at the top centre of the sidebar. The file must sit in the same
+# folder as this app (e.g. the GitHub repo root). If it is missing, nothing
+# is shown and the rest of the sidebar is unaffected.
+SIDEBAR_LOGO_FILE = "KMN-Aqua-logo.png"
+_sidebar_logo_src = image_src_from_cell(SIDEBAR_LOGO_FILE)
+_sidebar_logo_html = (
+    f"<div class='nav-logo'><img src=\"{html.escape(_sidebar_logo_src, quote=True)}\" alt='KMN Aqua'></div>"
+    if _sidebar_logo_src else ""
+)
+
 with st.sidebar:
     st.markdown(
+        f"{_sidebar_logo_html}"
         "<div class='nav-brand'>"
         "<div class='nav-brand-title'>Vehicle History</div>"
         "<div class='nav-brand-sub'>KMN &middot; Monitoring System</div>"
