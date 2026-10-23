@@ -45,14 +45,18 @@ DEFAULT_VEHICLE_SHEET_NAME = "Sheet2"
 # column layout, so it is left untouched instead of being overwritten.
 DEFAULT_MILEAGE_LOG_SHEET_NAME = "MileageLog"
 
-# Storage columns for the Weekly Mileage Inspection sheet: one row per entry.
+# Storage columns for the Mileage Inspection sheet: one row per entry.
 # "Oil Type" is appended last so existing rows/columns never shift position.
 MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User", "Oil Type"]
-MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage"]
+MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage"]
 
 # Oil Type options and how many KM after a service the next one is due.
 OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500}
 OIL_TYPES = list(OIL_SERVICE_INTERVALS.keys())
+
+# Chemical additive: how many KM after an Additive Changed Mileage entry the
+# next additive change is due. Change this one number to adjust it.
+ADDITIVE_INTERVAL_KM = 5000
 
 # Lorries that service every 5000 km. Every other Lorry services every 6000 km.
 # Vehicle Nos are compared ignoring spaces and letter case.
@@ -230,6 +234,10 @@ def inject_sidebar_style():
         width: 100%; margin: 0 !important; padding: 0.55rem 0.85rem;
         border-radius: 8px; border: 1px solid transparent; cursor: pointer;
         transition: background 0.15s ease;
+    }
+    /* Hide the round radio-point icon in front of each menu item */
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
+        display: none !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label * { color: #dbe7f3 !important; }
@@ -488,7 +496,7 @@ def get_vehicle_worksheet():
 
 @st.cache_resource(show_spinner=False)
 def get_mileage_log_worksheet():
-    """Weekly Mileage Inspection entries live in their own sheet/tab
+    """Mileage Inspection entries live in their own sheet/tab
     (separate from VehicleHistory and Sheet2), created automatically the
     first time it's needed. One row per mileage entry."""
     sh = get_spreadsheet()
@@ -881,7 +889,7 @@ def load_vehicle_all_columns():
 
 
 # -------------------------------------------------------------------------
-# Weekly Mileage Inspection helpers
+# Mileage Inspection helpers
 # -------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=20)
 def load_mileage_log(sheet_id):
@@ -957,6 +965,33 @@ def next_service_interval(log_df, vehicle_no):
     return None, ""
 
 
+def next_additive_interval(log_df, vehicle_no):
+    """Returns (km_interval, label) for the next chemical additive change.
+    A single fixed interval (ADDITIVE_INTERVAL_KM) is used for every vehicle."""
+    return ADDITIVE_INTERVAL_KM, "Additive"
+
+
+# The two "kinds" of mileage line / report: Service Details (Serviced
+# Mileage) and Chemical Additive Details (Additive Changed Mileage). Both use
+# the same layout; only the mileage type, captions and interval differ.
+SERVICE_KIND = {
+    "key": "service",
+    "mileage_type": "Serviced Mileage",
+    "last_caption": "Last Serviced",
+    "next_caption": "Next Service",
+    "report_title": "Serviced Report",
+    "interval": next_service_interval,
+}
+ADDITIVE_KIND = {
+    "key": "additive",
+    "mileage_type": "Additive Changed Mileage",
+    "last_caption": "Last Additive Changed",
+    "next_caption": "Next Additive Change",
+    "report_title": "Chemical Additive Report",
+    "interval": next_additive_interval,
+}
+
+
 def _fmt_mileage(value):
     num = to_number(value)
     if str(value).strip() == "":
@@ -964,17 +999,21 @@ def _fmt_mileage(value):
     return f"{int(num)}" if num == int(num) else f"{num}"
 
 
-def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
+def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
     """One horizontal 'line' per vehicle: a thick black track with an orange
     Last Serviced box and a white Weekly Mileage box (each with its date
     underneath), mirroring the reference layout. The Rider's name (from
     Sheet2) is shown in brackets on the line below the Vehicle No."""
+    kind = kind or SERVICE_KIND
+    last_type = kind["mileage_type"]
+    interval_fn = kind["interval"]
+
     def _km_to_next_service(v):
         """Next Service mileage minus latest Weekly Mileage, or None when it
         can't be worked out (no serviced/weekly entry or no oil type)."""
-        s = latest_mileage_entry(log_df, v, "Serviced Mileage")
+        s = latest_mileage_entry(log_df, v, last_type)
         w = latest_mileage_entry(log_df, v, "Weekly Mileage")
-        iv, _ = next_service_interval(log_df, v)
+        iv, _ = interval_fn(log_df, v)
         if s and w and iv:
             return (to_number(s[0]) + iv) - to_number(w[0])
         return None
@@ -993,7 +1032,7 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
 
     rows_html = []
     for vno in vehicles:
-        serviced = latest_mileage_entry(log_df, vno, "Serviced Mileage")
+        serviced = latest_mileage_entry(log_df, vno, last_type)
         weekly = latest_mileage_entry(log_df, vno, "Weekly Mileage")
 
         # Rider name (from Sheet2) shown in brackets under the Vehicle No.
@@ -1007,7 +1046,7 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
 
         # Next service = last serviced mileage + the interval for the oil
         # used at that service (Castrol 5000 km, Bajaj Genuine 2500 km).
-        interval, interval_label = next_service_interval(log_df, vno)
+        interval, interval_label = interval_fn(log_df, vno)
         if serviced and interval:
             n_val = _fmt_mileage(to_number(serviced[0]) + interval)
             n_note = f"{html.escape(interval_label)} (+{interval} km)"
@@ -1048,7 +1087,7 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
           <div class="track">
             <div class="seg short"></div>
             <div class="col">
-              <div class="cap">Last Serviced</div>
+              <div class="cap">{html.escape(kind["last_caption"])}</div>
               <div class="box serviced">{html.escape(s_val)}</div>
               <div class="dt">{s_date}</div>
             </div>
@@ -1060,7 +1099,7 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
             </div>
             {remaining_html}
             <div class="col wide">
-              <div class="cap">Next Service</div>
+              <div class="cap">{html.escape(kind["next_caption"])}</div>
               <div class="box {next_box_class}">{html.escape(n_val)}</div>
               <div class="dt">{n_note}</div>
             </div>
@@ -1114,9 +1153,9 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None):
 
 
 # -------------------------------------------------------------------------
-# Serviced Report helpers
+# Serviced Report / Chemical Additive Report helpers
 # -------------------------------------------------------------------------
-# Vehicle Types left out of the Weekly Mileage Inspection and Serviced Report.
+# Vehicle Types left out of the Mileage Inspection and the reports.
 EXCLUDED_VEHICLE_TYPES = {"other", "others"}
 
 
@@ -1125,7 +1164,7 @@ def is_excluded_vehicle_type(vehicle_type):
 
 
 def vehicle_type_group_rank(vehicle_type):
-    """Serviced Report group order: Bike (0), Lorry (1), Car/Cab (2); a
+    """Report group order: Bike (0), Lorry (1), Car/Cab (2); a
     vehicle with a blank Vehicle Type goes last (3)."""
     vtype = str(vehicle_type).strip().lower()
     if not vtype:
@@ -1137,20 +1176,21 @@ def vehicle_type_group_rank(vehicle_type):
     return 0
 
 
-def km_to_next_service(log_df, vehicle_no):
-    """KM still to go until the next service: (last Serviced Mileage +
-    service interval) minus the latest Weekly Mileage — the same figure
-    shown in red on the Mileage Lines. Negative means overdue. Returns None
-    when it can't be worked out (no serviced/weekly entry, or no interval)."""
-    serviced = latest_mileage_entry(log_df, vehicle_no, "Serviced Mileage")
+def km_to_next_service(log_df, vehicle_no, kind=None):
+    """KM still to go until the next service (or additive change): (last
+    Serviced/Additive Changed Mileage + interval) minus the latest Weekly
+    Mileage — the same figure shown in red on the Mileage Lines. Negative
+    means overdue. Returns None when it can't be worked out."""
+    kind = kind or SERVICE_KIND
+    serviced = latest_mileage_entry(log_df, vehicle_no, kind["mileage_type"])
     weekly = latest_mileage_entry(log_df, vehicle_no, "Weekly Mileage")
-    interval, _ = next_service_interval(log_df, vehicle_no)
+    interval, _ = kind["interval"](log_df, vehicle_no)
     if serviced and weekly and interval:
         return (to_number(serviced[0]) + interval) - to_number(weekly[0])
     return None
 
 
-def build_serviced_report_rows(log_df, vehicle_types=None):
+def build_serviced_report_rows(log_df, vehicle_types=None, kind=None):
     """One row per vehicle (optionally limited to the given Vehicle Types),
     leaving out the Others vehicle type. Rows are grouped Bike, Lorry, then
     Car/Cab, and within each group ordered by KM left to the next service,
@@ -1163,11 +1203,14 @@ def build_serviced_report_rows(log_df, vehicle_types=None):
             continue
         if vehicle_types and vtype not in vehicle_types:
             continue
+        # Chemical additive applies to Lorry and Car/Cab only.
+        if kind is ADDITIVE_KIND and not is_fixed_interval_type(vtype):
+            continue
         rows.append({
             "Vehicle No": vno,
             "Vehicle Type": vtype,
             "Rider": info.get("Rider", ""),
-            "km": km_to_next_service(log_df, vno),
+            "km": km_to_next_service(log_df, vno, kind),
         })
     rows.sort(key=lambda r: (
         vehicle_type_group_rank(r["Vehicle Type"]),
@@ -1178,13 +1221,14 @@ def build_serviced_report_rows(log_df, vehicle_types=None):
     return rows
 
 
-def serviced_line_data(log_df, vehicle_no):
-    """The figures shown on one Serviced Report line — the same values the
-    Mileage Lines show for a vehicle (Last Serviced, Weekly Mileage, the two
-    red KM figures and Next Service)."""
-    serviced = latest_mileage_entry(log_df, vehicle_no, "Serviced Mileage")
+def serviced_line_data(log_df, vehicle_no, kind=None):
+    """The figures shown on one report line — the same values the Mileage
+    Lines show for a vehicle (Last Serviced / Additive Changed, Weekly
+    Mileage, the two red KM figures and the Next figure)."""
+    kind = kind or SERVICE_KIND
+    serviced = latest_mileage_entry(log_df, vehicle_no, kind["mileage_type"])
     weekly = latest_mileage_entry(log_df, vehicle_no, "Weekly Mileage")
-    interval, interval_label = next_service_interval(log_df, vehicle_no)
+    interval, interval_label = kind["interval"](log_df, vehicle_no)
 
     data = {
         "s_val": _fmt_mileage(serviced[0]) if serviced else "—",
@@ -1210,17 +1254,19 @@ def serviced_line_data(log_df, vehicle_no):
     return data
 
 
-def build_serviced_report_pdf(rows, log_df):
-    """Renders the Serviced Report as a portrait PDF laid out like the
-    Mileage Lines: one line per vehicle (Vehicle No with the Rider in
-    brackets, orange Last Serviced box, white Weekly Mileage box, blue Next
-    Service box, red KM figures on the line), grouped Bike, Lorry, Car/Cab.
-    `rows` must already be ordered (see build_serviced_report_rows)."""
+def build_serviced_report_pdf(rows, log_df, kind=None):
+    """Renders the Serviced Report (or Chemical Additive Report) as a
+    portrait PDF laid out like the Mileage Lines: one line per vehicle
+    (Vehicle No with the Rider in brackets, orange Last Serviced box, white
+    Weekly Mileage box, blue Next Service box, red KM figures on the line),
+    grouped Bike, Lorry, Car/Cab. `rows` must already be ordered (see
+    build_serviced_report_rows)."""
+    kind = kind or SERVICE_KIND
     group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
     buffer = io.BytesIO()
     page_w, page_h = A4
     c = canvas.Canvas(buffer, pagesize=(page_w, page_h))
-    c.setTitle("Serviced Report")
+    c.setTitle(kind["report_title"])
 
     margin = 12 * mm
     row_h = 26 * mm
@@ -1251,7 +1297,7 @@ def build_serviced_report_pdf(rows, log_df):
         return y - head_h
 
     def draw_row(yb, r):
-        d = serviced_line_data(log_df, r["Vehicle No"])
+        d = serviced_line_data(log_df, r["Vehicle No"], kind)
         cy = yb + row_h / 2
 
         # Row card
@@ -1314,7 +1360,7 @@ def build_serviced_report_pdf(rows, log_df):
         next_fill = red if low_km else colors.HexColor("#1e6fd9")
 
         x = x_track + 3 * mm
-        draw_col(x, 26 * mm, "Last Serviced", d["s_val"], d["s_date"], colors.HexColor("#ed7d31"), black)
+        draw_col(x, 26 * mm, kind["last_caption"], d["s_val"], d["s_date"], colors.HexColor("#ed7d31"), black)
         x += 26 * mm
         draw_seg_text(x, 17 * mm, d["diff"])
         x += 17 * mm
@@ -1322,14 +1368,14 @@ def build_serviced_report_pdf(rows, log_df):
         x += 26 * mm
         draw_seg_text(x, 17 * mm, d["remaining"])
         x += 17 * mm
-        draw_col(x, 42 * mm, "Next Service", d["n_val"], d["n_note"], next_fill, colors.white)
+        draw_col(x, 42 * mm, kind["next_caption"], d["n_val"], d["n_note"], next_fill, colors.white)
 
     # Page title
     c.setFillColor(black)
     c.setFont("Helvetica-Bold", 15)
     c.drawCentredString(page_w / 2, page_h - margin - 5 * mm, "Vehicle History Monitoring System - KMN")
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(left, page_h - margin - 14 * mm, "Serviced Report")
+    c.drawString(left, page_h - margin - 14 * mm, kind["report_title"])
     c.setFont("Helvetica", 8)
     c.setFillColor(grey)
     c.drawRightString(right, page_h - margin - 14 * mm, f"Generated on {date.today().isoformat()}")
@@ -1355,15 +1401,15 @@ def build_serviced_report_pdf(rows, log_df):
     c.setFillColor(grey)
     c.drawString(
         left, y - 3 * mm,
-        "Red figures on the line: KM run since the last service (between Last Serviced and Weekly Mileage) and",
+        f"Red figures on the line: KM run since the {kind['last_caption'].lower()} mileage (between {kind['last_caption']} and Weekly Mileage) and",
     )
     c.drawString(
         left, y - 6.5 * mm,
-        "KM left until the next service (between Weekly Mileage and Next Service). Zero or negative = due or overdue.",
+        f"KM left until the next one (between Weekly Mileage and {kind['next_caption']}). Zero or negative = due or overdue.",
     )
     c.drawString(
         left, y - 10 * mm,
-        "A red Next Service box means 500 km or fewer are left.",
+        f"A red {kind['next_caption']} box means 500 km or fewer are left.",
     )
     c.save()
     return buffer.getvalue()
@@ -1424,7 +1470,10 @@ with st.sidebar:
     )
     phase = st.radio(
         "Sections",
-        ["📋 Record Entering", "📊 View", "🚙 Vehicle Details", "📈 Analytics", "🛣️ Weekly Mileage Inspection"],
+        [
+            "Record Entering", "View", "Vehicle Details", "Analytics",
+            "Mileage Inspection", "Service Details", "Chemical Additive Details",
+        ],
         label_visibility="collapsed",
     )
     st.markdown("<div class='nav-spacer'></div>", unsafe_allow_html=True)
@@ -1515,7 +1564,7 @@ vehicle_map = {vno: info.get("Vehicle Type", "") for vno, info in vehicle_detail
 # =========================================================================
 # PHASE 1 — RECORD ENTERING
 # =========================================================================
-if phase == "📋 Record Entering":
+if phase == "Record Entering":
     st.markdown("#### 📋 Record Entering")
 
     vehicle_options = sorted(vehicle_map.keys())
@@ -1798,7 +1847,7 @@ if phase == "📋 Record Entering":
 # =========================================================================
 # PHASE 2 — VIEW
 # =========================================================================
-elif phase == "📊 View":
+elif phase == "View":
     st.markdown("#### 📊 View Vehicle History")
 
     df = load_data()
@@ -1913,7 +1962,7 @@ elif phase == "📊 View":
 # =========================================================================
 # PHASE 3 — VEHICLE DETAILS
 # =========================================================================
-elif phase == "🚙 Vehicle Details":
+elif phase == "Vehicle Details":
     st.markdown("#### 🚙 Vehicle Details")
 
     try:
@@ -1998,7 +2047,7 @@ elif phase == "🚙 Vehicle Details":
 # =========================================================================
 # PHASE 4 — ANALYTICS
 # =========================================================================
-elif phase == "📈 Analytics":
+elif phase == "Analytics":
     st.markdown("#### 📈 Analytics")
 
     analytics_df = load_data()
@@ -2070,26 +2119,23 @@ elif phase == "📈 Analytics":
                     st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
 # =========================================================================
-# PHASE 5 — WEEKLY MILEAGE INSPECTION (three sub-phases)
+# PHASES 5-7 — MILEAGE INSPECTION (Entering), SERVICE DETAILS and
+# CHEMICAL ADDITIVE DETAILS (Mileage Lines + report each)
 # =========================================================================
-elif phase == "🛣️ Weekly Mileage Inspection":
-    st.markdown("#### 🛣️ Weekly Mileage Inspection")
+elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Details"):
+    st.markdown(f"#### 🛣️ {phase}")
 
-    st.caption(
-        "Entries are kept in their own "
-        f"**{_mileage_log_worksheet_name()}** sheet, separate from the vehicle history records."
-    )
-
-    mileage_phase = st.radio(
-        "Mileage phase",
-        ["✍️ Entering", "📍 Mileage Lines", "📑 Serviced Report"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="mileage_subphase",
-    )
-    st.markdown("---")
+    if phase == "Mileage Inspection":
+        st.caption(
+            "Entries are kept in their own "
+            f"**{_mileage_log_worksheet_name()}** sheet, separate from the vehicle history records."
+        )
+        st.markdown("---")
 
     vehicle_types_available = sorted({t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)})
+    # Chemical additive applies to Lorry and Car/Cab only.
+    if phase == "Chemical Additive Details":
+        vehicle_types_available = [t for t in vehicle_types_available if is_fixed_interval_type(t)]
 
     if not vehicle_map:
         st.info(
@@ -2109,17 +2155,23 @@ elif phase == "🛣️ Weekly Mileage Inspection":
             st.error(f"❌ Could not read the **{_mileage_log_worksheet_name()}** sheet.\n\n{e}")
 
         # ---------------------------------------------------------------
-        # SUB-PHASE 1 — ENTERING
+        # MILEAGE INSPECTION — ENTERING
         # ---------------------------------------------------------------
-        if mileage_phase == "✍️ Entering":
+        if phase == "Mileage Inspection":
             # Selections live outside the form so Vehicle No's options
             # update live as soon as the Vehicle Type changes.
             ml_vehicle_type = st.selectbox("Vehicle Type *", vehicle_types_available, key="mil_vehicle_type")
             ml_vehicle_options = sorted(v for v, t in vehicle_map.items() if t == ml_vehicle_type)
             ml_vehicle_no = st.selectbox("Vehicle No *", ml_vehicle_options, key="mil_vehicle_no")
-            ml_mileage_type = st.selectbox("Mileage Type *", MILEAGE_TYPES, key="mil_mileage_type")
+            # Additive Changed Mileage is only offered for Lorry and Car/Cab.
+            ml_mileage_type_options = [
+                m for m in MILEAGE_TYPES
+                if m != "Additive Changed Mileage" or is_fixed_interval_type(ml_vehicle_type)
+            ]
+            ml_mileage_type = st.selectbox("Mileage Type *", ml_mileage_type_options, key="mil_mileage_type")
             # Oil Type only applies to a service, so it appears when
             # Serviced Mileage is selected (outside the form so it shows live).
+            # It is not shown for Weekly Mileage or Additive Changed Mileage.
             # Lorry and Car/Cab: free-text and optional (their next service
             # interval is fixed and doesn't depend on the oil). Other types
             # (bikes): a required selection, as the oil decides the interval.
@@ -2193,85 +2245,128 @@ elif phase == "🛣️ Weekly Mileage Inspection":
                 st.dataframe(entries_view, use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------------
-        # SUB-PHASE 2 — MILEAGE LINES
-        # ---------------------------------------------------------------
-        elif mileage_phase == "📍 Mileage Lines":
-            lines_vehicle_type = st.selectbox("Vehicle Type", vehicle_types_available, key="mil_lines_vehicle_type")
-            lines_vehicles = sorted(v for v, t in vehicle_map.items() if t == lines_vehicle_type)
-
-            if not lines_vehicles:
-                st.info("No vehicles found for this Vehicle Type.")
-            else:
-                lines_html = build_mileage_lines_html(mileage_log_df, lines_vehicles, red_below_km=501)
-                components.html(
-                    lines_html,
-                    height=min(len(lines_vehicles) * 114 + 20, 900),
-                    scrolling=True,
-                )
-                st.caption(
-                    "Shows each vehicle's latest Serviced Mileage (orange) and latest "
-                    "Weekly Mileage (white) with their dates. Next Service is the last serviced "
-                    "mileage + 6000 km for Car/Cab, + 5000 km for Lorry LB 8797 and 227 - 4969 "
-                    "(+ 6000 km for all other Lorries), and for bikes "
-                    "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine). "
-                    "A red Next Service box means 500 km or fewer are left."
-                )
-
-        # ---------------------------------------------------------------
-        # SUB-PHASE 3 — SERVICED REPORT
+        # SERVICE DETAILS / CHEMICAL ADDITIVE DETAILS
         # ---------------------------------------------------------------
         else:
-            report_type_options = sorted(
-                {t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)},
-                key=lambda t: (vehicle_type_group_rank(t), t),
+            kind = SERVICE_KIND if phase == "Service Details" else ADDITIVE_KIND
+            sub_options = ["📍 Mileage Lines", f"📑 {kind['report_title']}"]
+            detail_subphase = st.radio(
+                "Detail phase",
+                sub_options,
+                horizontal=True,
+                label_visibility="collapsed",
+                key=f"detail_subphase_{kind['key']}",
             )
-            report_type_filter = st.multiselect(
-                "Filter by Vehicle Type (leave empty for all)",
-                report_type_options,
-                key="serviced_report_types",
-            )
+            st.markdown("---")
 
-            report_rows = build_serviced_report_rows(mileage_log_df, report_type_filter)
+            # -----------------------------------------------------------
+            # MILEAGE LINES
+            # -----------------------------------------------------------
+            if detail_subphase == sub_options[0]:
+                lines_vehicle_type = st.selectbox(
+                    "Vehicle Type", vehicle_types_available, key=f"mil_lines_vehicle_type_{kind['key']}"
+                )
+                lines_vehicles = sorted(v for v, t in vehicle_map.items() if t == lines_vehicle_type)
 
-            if not report_rows:
-                st.info("No vehicles match the selected Vehicle Type.")
-            else:
-                # Same line layout as the Weekly Mileage Inspection > Mileage Lines,
-                # one block per vehicle type group (Bike, Lorry, Car/Cab). Each block
-                # is ordered by KM left to the next service, smallest first.
-                report_group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
-                for report_rank in sorted({vehicle_type_group_rank(r["Vehicle Type"]) for r in report_rows}):
-                    group_vehicles = [
-                        r["Vehicle No"] for r in report_rows
-                        if vehicle_type_group_rank(r["Vehicle Type"]) == report_rank
-                    ]
-                    st.markdown(f"##### {report_group_names[report_rank]}")
+                if not lines_vehicles:
+                    st.info("No vehicles found for this Vehicle Type.")
+                else:
+                    lines_html = build_mileage_lines_html(
+                        mileage_log_df, lines_vehicles, red_below_km=501, kind=kind
+                    )
                     components.html(
-                        build_mileage_lines_html(mileage_log_df, group_vehicles, red_below_km=501),
-                        height=min(len(group_vehicles) * 114 + 20, 900),
+                        lines_html,
+                        height=min(len(lines_vehicles) * 114 + 20, 900),
                         scrolling=True,
                     )
-                st.caption(
-                    "Shows each vehicle's latest Serviced Mileage (orange) and latest "
-                    "Weekly Mileage (white) with their dates, and the Next Service mileage (blue). "
-                    "The red figures are the KM run since the last service and the KM left until the next "
-                    "service (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
-                    "with the fewest KM left first within each group. A red Next Service box means "
-                    "500 km or fewer are left."
+                    if kind is SERVICE_KIND:
+                        st.caption(
+                            "Shows each vehicle's latest Serviced Mileage (orange) and latest "
+                            "Weekly Mileage (white) with their dates. Next Service is the last serviced "
+                            "mileage + 6000 km for Car/Cab, + 5000 km for Lorry LB 8797 and 227 - 4969 "
+                            "(+ 6000 km for all other Lorries), and for bikes "
+                            "+ 5000 km (Castrol) or + 2500 km (Bajaj Genuine). "
+                            "A red Next Service box means 500 km or fewer are left."
+                        )
+                    else:
+                        st.caption(
+                            "Shows each vehicle's latest Additive Changed Mileage (orange) and latest "
+                            "Weekly Mileage (white) with their dates. Next Additive Change is the last "
+                            f"additive changed mileage + {ADDITIVE_INTERVAL_KM} km. "
+                            "A red Next Additive Change box means 500 km or fewer are left."
+                        )
+
+            # -----------------------------------------------------------
+            # SERVICED REPORT / CHEMICAL ADDITIVE REPORT
+            # -----------------------------------------------------------
+            else:
+                report_type_options = sorted(
+                    {
+                        t for t in vehicle_map.values()
+                        if t and not is_excluded_vehicle_type(t)
+                        and (kind is SERVICE_KIND or is_fixed_interval_type(t))
+                    },
+                    key=lambda t: (vehicle_type_group_rank(t), t),
+                )
+                report_type_filter = st.multiselect(
+                    "Filter by Vehicle Type (leave empty for all)",
+                    report_type_options,
+                    key=f"report_types_{kind['key']}",
                 )
 
-                if _REPORTLAB_AVAILABLE:
-                    st.download_button(
-                        "⬇️ Download Serviced Report as PDF",
-                        build_serviced_report_pdf(report_rows, mileage_log_df),
-                        file_name=f"serviced_report_{date.today().isoformat()}.pdf",
-                        mime="application/pdf",
-                    )
+                report_rows = build_serviced_report_rows(mileage_log_df, report_type_filter, kind)
+
+                if not report_rows:
+                    st.info("No vehicles match the selected Vehicle Type.")
                 else:
-                    st.warning(
-                        "PDF export needs the **reportlab** package. Add `reportlab` to your "
-                        "requirements.txt and redeploy, then the download button will appear here."
-                    )
+                    # Same line layout as the Mileage Lines, one block per vehicle
+                    # type group (Bike, Lorry, Car/Cab). Each block is ordered by
+                    # KM left to the next one, smallest first.
+                    report_group_names = {0: "Bike", 1: "Lorry", 2: "Car/Cab", 3: "No Vehicle Type"}
+                    for report_rank in sorted({vehicle_type_group_rank(r["Vehicle Type"]) for r in report_rows}):
+                        group_vehicles = [
+                            r["Vehicle No"] for r in report_rows
+                            if vehicle_type_group_rank(r["Vehicle Type"]) == report_rank
+                        ]
+                        st.markdown(f"##### {report_group_names[report_rank]}")
+                        components.html(
+                            build_mileage_lines_html(mileage_log_df, group_vehicles, red_below_km=501, kind=kind),
+                            height=min(len(group_vehicles) * 114 + 20, 900),
+                            scrolling=True,
+                        )
+                    if kind is SERVICE_KIND:
+                        st.caption(
+                            "Shows each vehicle's latest Serviced Mileage (orange) and latest "
+                            "Weekly Mileage (white) with their dates, and the Next Service mileage (blue). "
+                            "The red figures are the KM run since the last service and the KM left until the next "
+                            "service (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
+                            "with the fewest KM left first within each group. A red Next Service box means "
+                            "500 km or fewer are left."
+                        )
+                    else:
+                        st.caption(
+                            "Shows each vehicle's latest Additive Changed Mileage (orange) and latest "
+                            "Weekly Mileage (white) with their dates, and the Next Additive Change mileage (blue). "
+                            "The red figures are the KM run since the last additive change and the KM left until the "
+                            "next one (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
+                            "with the fewest KM left first within each group. A red Next Additive Change box means "
+                            "500 km or fewer are left."
+                        )
+
+                    if _REPORTLAB_AVAILABLE:
+                        pdf_prefix = "serviced_report" if kind is SERVICE_KIND else "chemical_additive_report"
+                        st.download_button(
+                            f"⬇️ Download {kind['report_title']} as PDF",
+                            build_serviced_report_pdf(report_rows, mileage_log_df, kind),
+                            file_name=f"{pdf_prefix}_{date.today().isoformat()}.pdf",
+                            mime="application/pdf",
+                            key=f"download_pdf_{kind['key']}",
+                        )
+                    else:
+                        st.warning(
+                            "PDF export needs the **reportlab** package. Add `reportlab` to your "
+                            "requirements.txt and redeploy, then the download button will appear here."
+                        )
 
 st.markdown("---")
 st.markdown(
