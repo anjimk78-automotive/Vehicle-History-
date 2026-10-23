@@ -607,7 +607,7 @@ def backfill_record_ids():
     return len(missing)
 
 
-@st.cache_data(show_spinner=False, ttl=20)
+@st.cache_data(show_spinner=False, ttl=300)
 def _load_data_cached(sheet_id):
     ws = get_worksheet()
     # get_all_values() reads the raw grid and never raises on duplicate or
@@ -692,7 +692,7 @@ def _find_column_index(headers, *candidates):
     return None
 
 
-@st.cache_data(show_spinner=False, ttl=60)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_vehicle_details():
     """Returns {vehicle_no: {"Vehicle Type": ..., "Rider": ..., "Brand": ...}}
     sourced from Sheet2. Uses raw grid values (not get_all_records()) so
@@ -890,7 +890,7 @@ def build_details_table_html(headers, info):
     )
 
 
-@st.cache_data(show_spinner=False, ttl=60)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_vehicle_all_columns():
     """Returns ({vehicle_no: {header: value, ...}}, [headers]) covering
     every column present in Sheet2 (not just Vehicle Type/Rider/Brand) —
@@ -921,7 +921,7 @@ def load_vehicle_all_columns():
 # -------------------------------------------------------------------------
 # Mileage Inspection helpers
 # -------------------------------------------------------------------------
-@st.cache_data(show_spinner=False, ttl=20)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_mileage_log(sheet_id):
     ws = get_mileage_log_worksheet()
     values = ws.get_all_values()
@@ -1537,15 +1537,20 @@ with st.sidebar:
     ]
     if st.session_state.get("phase") not in SECTIONS:
         st.session_state["phase"] = SECTIONS[0]
+    def _go_to_section(section):
+        st.session_state["phase"] = section
+
+    # on_click runs before the page reruns, so a click costs one run instead
+    # of two (the old click + st.rerun() ran the whole script twice).
     for _section in SECTIONS:
-        if st.button(
+        st.button(
             _section,
             key=f"nav_{_section}",
             use_container_width=True,
             type="primary" if st.session_state["phase"] == _section else "secondary",
-        ):
-            st.session_state["phase"] = _section
-            st.rerun()
+            on_click=_go_to_section,
+            args=(_section,),
+        )
     phase = st.session_state["phase"]
     st.markdown("<div class='nav-spacer'></div>", unsafe_allow_html=True)
     # One Refresh for the whole app: clears every cached read so the next
