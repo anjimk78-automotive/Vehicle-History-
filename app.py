@@ -236,8 +236,16 @@ def inject_sidebar_style():
         transition: background 0.15s ease;
     }
     /* Hide the round radio-point icon in front of each menu item */
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > span:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > *:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])) {
         display: none !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div[data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:has([data-testid="stMarkdownContainer"]) {
+        display: block !important;
+        margin-left: 0 !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label * { color: #dbe7f3 !important; }
