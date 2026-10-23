@@ -236,16 +236,8 @@ def inject_sidebar_style():
         transition: background 0.15s ease;
     }
     /* Hide the round radio-point icon in front of each menu item */
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child,
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > span:first-child,
-    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child,
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > *:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])) {
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
         display: none !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div[data-testid="stMarkdownContainer"],
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:has([data-testid="stMarkdownContainer"]) {
-        display: block !important;
-        margin-left: 0 !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label * { color: #dbe7f3 !important; }
@@ -1476,24 +1468,14 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
-    # Menu items are buttons (no round radio point); the active one is
-    # highlighted. The chosen section is kept in session state.
-    SECTIONS = [
-        "Record Entering", "View", "Vehicle Details", "Analytics",
-        "Mileage Inspection", "Service Details", "Chemical Additive Details",
-    ]
-    if st.session_state.get("phase") not in SECTIONS:
-        st.session_state["phase"] = SECTIONS[0]
-    for _section in SECTIONS:
-        if st.button(
-            _section,
-            key=f"nav_{_section}",
-            use_container_width=True,
-            type="primary" if st.session_state["phase"] == _section else "secondary",
-        ):
-            st.session_state["phase"] = _section
-            st.rerun()
-    phase = st.session_state["phase"]
+    phase = st.radio(
+        "Sections",
+        [
+            "Record Entering", "View", "Vehicle Details", "Analytics",
+            "Mileage Inspection", "Service Details", "Chemical Additive Details",
+        ],
+        label_visibility="collapsed",
+    )
     st.markdown("<div class='nav-spacer'></div>", unsafe_allow_html=True)
     # One Refresh for the whole app: clears every cached read so the next
     # load fetches fresh data from the Google Sheet.
