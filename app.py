@@ -48,7 +48,7 @@ DEFAULT_MILEAGE_LOG_SHEET_NAME = "MileageLog"
 # Storage columns for the Mileage Inspection sheet: one row per entry.
 # "Oil Type" is appended last so existing rows/columns never shift position.
 MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User", "Oil Type"]
-MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage"]
+MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage", "Diesel System Tune - Up Changed"]
 
 # Oil Type options and how many KM after a service the next one is due.
 OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500}
@@ -57,6 +57,11 @@ OIL_TYPES = list(OIL_SERVICE_INTERVALS.keys())
 # Chemical additive: how many KM after an Additive Changed Mileage entry the
 # next additive change is due. Change this one number to adjust it.
 ADDITIVE_INTERVAL_KM = 5000
+
+# Diesel System Tune - Up (Lorry only): how many KM after a "Diesel System
+# Tune - Up Changed" entry the next tune-up is due. Change this one number to
+# adjust it.
+DIESEL_TUNEUP_INTERVAL_KM = 25000
 
 # Lorries that service every 5000 km. Every other Lorry services every 6000 km.
 # Vehicle Nos are compared ignoring spaces and letter case.
@@ -236,8 +241,16 @@ def inject_sidebar_style():
         transition: background 0.15s ease;
     }
     /* Hide the round radio-point icon in front of each menu item */
-    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > span:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] > div:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > *:not([data-testid="stMarkdownContainer"]):not(:has([data-testid="stMarkdownContainer"])) {
         display: none !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div[data-testid="stMarkdownContainer"],
+    [data-testid="stSidebar"] [data-testid="stRadio"] label > div:has([data-testid="stMarkdownContainer"]) {
+        display: block !important;
+        margin-left: 0 !important;
     }
     [data-testid="stSidebar"] [data-testid="stRadio"] label:hover { background: rgba(255,255,255,0.10); }
     [data-testid="stSidebar"] [data-testid="stRadio"] label * { color: #dbe7f3 !important; }
@@ -992,6 +1005,36 @@ ADDITIVE_KIND = {
 }
 
 
+def is_lorry_type(vehicle_type):
+    """True for the Lorry vehicle type only."""
+    return "lorry" in str(vehicle_type).strip().lower()
+
+
+def next_diesel_interval(log_df, vehicle_no):
+    """Returns (km_interval, label) for the next Diesel System Tune - Up.
+    A single fixed interval (DIESEL_TUNEUP_INTERVAL_KM) is used."""
+    return DIESEL_TUNEUP_INTERVAL_KM, "Tune - Up"
+
+
+DIESEL_KIND = {
+    "key": "diesel",
+    "mileage_type": "Diesel System Tune - Up Changed",
+    "last_caption": "Last Tune - Up",
+    "next_caption": "Next Tune - Up",
+    "report_title": "Diesel System Tune - Up Report",
+    "interval": next_diesel_interval,
+}
+
+# Which Vehicle Types each kind applies to (Service: all, Chemical Additive:
+# Lorry and Car/Cab, Diesel System Tune - Up: Lorry only) and its interval.
+SERVICE_KIND["applies"] = lambda t: True
+ADDITIVE_KIND["applies"] = is_fixed_interval_type
+DIESEL_KIND["applies"] = is_lorry_type
+SERVICE_KIND["interval_km"] = None
+ADDITIVE_KIND["interval_km"] = ADDITIVE_INTERVAL_KM
+DIESEL_KIND["interval_km"] = DIESEL_TUNEUP_INTERVAL_KM
+
+
 def _fmt_mileage(value):
     num = to_number(value)
     if str(value).strip() == "":
@@ -1203,8 +1246,8 @@ def build_serviced_report_rows(log_df, vehicle_types=None, kind=None):
             continue
         if vehicle_types and vtype not in vehicle_types:
             continue
-        # Chemical additive applies to Lorry and Car/Cab only.
-        if kind is ADDITIVE_KIND and not is_fixed_interval_type(vtype):
+        # Chemical additive: Lorry and Car/Cab only. Diesel tune-up: Lorry only.
+        if not (kind or SERVICE_KIND)["applies"](vtype):
             continue
         rows.append({
             "Vehicle No": vno,
@@ -1468,14 +1511,25 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
-    phase = st.radio(
-        "Sections",
-        [
-            "Record Entering", "View", "Vehicle Details", "Analytics",
-            "Mileage Inspection", "Service Details", "Chemical Additive Details",
-        ],
-        label_visibility="collapsed",
-    )
+    # Menu items are buttons (no round radio point); the active one is
+    # highlighted. The chosen section is kept in session state.
+    SECTIONS = [
+        "Record Entering", "View", "Vehicle Details", "Analytics",
+        "Mileage Inspection", "Service Details", "Chemical Additive Details",
+        "Diesel System Tune - Up",
+    ]
+    if st.session_state.get("phase") not in SECTIONS:
+        st.session_state["phase"] = SECTIONS[0]
+    for _section in SECTIONS:
+        if st.button(
+            _section,
+            key=f"nav_{_section}",
+            use_container_width=True,
+            type="primary" if st.session_state["phase"] == _section else "secondary",
+        ):
+            st.session_state["phase"] = _section
+            st.rerun()
+    phase = st.session_state["phase"]
     st.markdown("<div class='nav-spacer'></div>", unsafe_allow_html=True)
     # One Refresh for the whole app: clears every cached read so the next
     # load fetches fresh data from the Google Sheet.
@@ -2122,7 +2176,7 @@ elif phase == "Analytics":
 # PHASES 5-7 — MILEAGE INSPECTION (Entering), SERVICE DETAILS and
 # CHEMICAL ADDITIVE DETAILS (Mileage Lines + report each)
 # =========================================================================
-elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Details"):
+elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Details", "Diesel System Tune - Up"):
     st.markdown(f"#### 🛣️ {phase}")
 
     if phase == "Mileage Inspection":
@@ -2133,9 +2187,12 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
         st.markdown("---")
 
     vehicle_types_available = sorted({t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)})
-    # Chemical additive applies to Lorry and Car/Cab only.
+    # Chemical additive applies to Lorry and Car/Cab only; Diesel System
+    # Tune - Up applies to Lorry only.
     if phase == "Chemical Additive Details":
-        vehicle_types_available = [t for t in vehicle_types_available if is_fixed_interval_type(t)]
+        vehicle_types_available = [t for t in vehicle_types_available if ADDITIVE_KIND["applies"](t)]
+    elif phase == "Diesel System Tune - Up":
+        vehicle_types_available = [t for t in vehicle_types_available if DIESEL_KIND["applies"](t)]
 
     if not vehicle_map:
         st.info(
@@ -2163,10 +2220,12 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
             ml_vehicle_type = st.selectbox("Vehicle Type *", vehicle_types_available, key="mil_vehicle_type")
             ml_vehicle_options = sorted(v for v, t in vehicle_map.items() if t == ml_vehicle_type)
             ml_vehicle_no = st.selectbox("Vehicle No *", ml_vehicle_options, key="mil_vehicle_no")
-            # Additive Changed Mileage is only offered for Lorry and Car/Cab.
+            # Additive Changed Mileage is only offered for Lorry and Car/Cab;
+            # Diesel System Tune - Up Changed only for Lorry.
             ml_mileage_type_options = [
                 m for m in MILEAGE_TYPES
-                if m != "Additive Changed Mileage" or is_fixed_interval_type(ml_vehicle_type)
+                if (m != "Additive Changed Mileage" or ADDITIVE_KIND["applies"](ml_vehicle_type))
+                and (m != "Diesel System Tune - Up Changed" or DIESEL_KIND["applies"](ml_vehicle_type))
             ]
             ml_mileage_type = st.selectbox("Mileage Type *", ml_mileage_type_options, key="mil_mileage_type")
             # Oil Type only applies to a service, so it appears when
@@ -2248,7 +2307,11 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
         # SERVICE DETAILS / CHEMICAL ADDITIVE DETAILS
         # ---------------------------------------------------------------
         else:
-            kind = SERVICE_KIND if phase == "Service Details" else ADDITIVE_KIND
+            kind = {
+                "Service Details": SERVICE_KIND,
+                "Chemical Additive Details": ADDITIVE_KIND,
+                "Diesel System Tune - Up": DIESEL_KIND,
+            }[phase]
             sub_options = ["📍 Mileage Lines", f"📑 {kind['report_title']}"]
             detail_subphase = st.radio(
                 "Detail phase",
@@ -2290,10 +2353,10 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                         )
                     else:
                         st.caption(
-                            "Shows each vehicle's latest Additive Changed Mileage (orange) and latest "
-                            "Weekly Mileage (white) with their dates. Next Additive Change is the last "
-                            f"additive changed mileage + {ADDITIVE_INTERVAL_KM} km. "
-                            "A red Next Additive Change box means 500 km or fewer are left."
+                            f"Shows each vehicle's latest {kind['mileage_type']} (orange) and latest "
+                            f"Weekly Mileage (white) with their dates. {kind['next_caption']} is the last "
+                            f"{kind['mileage_type'].lower()} mileage + {kind['interval_km']} km. "
+                            f"A red {kind['next_caption']} box means 500 km or fewer are left."
                         )
 
             # -----------------------------------------------------------
@@ -2304,7 +2367,7 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                     {
                         t for t in vehicle_map.values()
                         if t and not is_excluded_vehicle_type(t)
-                        and (kind is SERVICE_KIND or is_fixed_interval_type(t))
+                        and kind["applies"](t)
                     },
                     key=lambda t: (vehicle_type_group_rank(t), t),
                 )
@@ -2345,16 +2408,20 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                         )
                     else:
                         st.caption(
-                            "Shows each vehicle's latest Additive Changed Mileage (orange) and latest "
-                            "Weekly Mileage (white) with their dates, and the Next Additive Change mileage (blue). "
-                            "The red figures are the KM run since the last additive change and the KM left until the "
+                            f"Shows each vehicle's latest {kind['mileage_type']} (orange) and latest "
+                            f"Weekly Mileage (white) with their dates, and the {kind['next_caption']} mileage (blue). "
+                            f"The red figures are the KM run since the {kind['last_caption'].lower()} and the KM left until the "
                             "next one (zero or negative means due or overdue). Grouped Bike, Lorry, then Car/Cab, "
-                            "with the fewest KM left first within each group. A red Next Additive Change box means "
+                            f"with the fewest KM left first within each group. A red {kind['next_caption']} box means "
                             "500 km or fewer are left."
                         )
 
                     if _REPORTLAB_AVAILABLE:
-                        pdf_prefix = "serviced_report" if kind is SERVICE_KIND else "chemical_additive_report"
+                        pdf_prefix = {
+                            "service": "serviced_report",
+                            "additive": "chemical_additive_report",
+                            "diesel": "diesel_system_tune_up_report",
+                        }[kind["key"]]
                         st.download_button(
                             f"⬇️ Download {kind['report_title']} as PDF",
                             build_serviced_report_pdf(report_rows, mileage_log_df, kind),
