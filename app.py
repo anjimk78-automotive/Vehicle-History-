@@ -281,6 +281,23 @@ def inject_sidebar_style():
     [data-testid="stSidebar"] .stButton > button div {
         color: #dbe7f3 !important; text-align: left; font-size: 0.92rem;
     }
+    /* Left-align the text of every sidebar button (menu items included) */
+    [data-testid="stSidebar"] .stButton > button {
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    [data-testid="stSidebar"] .stButton > button > div,
+    [data-testid="stSidebar"] .stButton > button [data-testid="stMarkdownContainer"] {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    [data-testid="stSidebar"] .stButton > button p {
+        width: 100% !important;
+        text-align: left !important;
+    }
     [data-testid="stSidebar"] .stButton > button:hover {
         background: rgba(255,255,255,0.10) !important;
         border: 1px solid rgba(255,255,255,0.18) !important;
