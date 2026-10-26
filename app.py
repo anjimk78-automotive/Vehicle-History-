@@ -1212,6 +1212,95 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
     """
 
 
+def build_mileage_timeline_html(log_df, vehicle_no):
+    """One horizontal line for a single vehicle that lists every Weekly
+    Mileage (white box) and Serviced Mileage (orange box) entry in date
+    order, oldest on the left. The KM run between two consecutive entries is
+    shown in red on the line between their boxes. Returns "" when the
+    vehicle has no Weekly/Serviced entries. Scrolls sideways if long."""
+    if log_df.empty:
+        return ""
+    sub = log_df[
+        (log_df["Vehicle No"] == vehicle_no)
+        & (log_df["Mileage Type"].isin(["Weekly Mileage", "Serviced Mileage"]))
+    ]
+    if sub.empty:
+        return ""
+    sub = sub.sort_values(["Date", "Timestamp"], ascending=[True, True])
+
+    rider_name = str(vehicle_details.get(vehicle_no, {}).get("Rider", "")).strip()
+    rider_html = f'<div class="rider">({html.escape(rider_name)})</div>' if rider_name else ""
+
+    parts = ['<div class="seg short"></div>']
+    prev_mileage = None
+    for _, entry in sub.iterrows():
+        is_service = entry["Mileage Type"] == "Serviced Mileage"
+        current = to_number(entry["Mileage (KM)"])
+        if prev_mileage is not None:
+            parts.append(
+                f'<div class="diff"><span>{html.escape(_fmt_mileage(current - prev_mileage))} km</span></div>'
+            )
+        parts.append(f"""
+            <div class="col">
+              <div class="cap">{"Serviced" if is_service else "Weekly"}</div>
+              <div class="box {"serviced" if is_service else "weekly"}">{html.escape(_fmt_mileage(entry["Mileage (KM)"]))}</div>
+              <div class="dt">{html.escape(str(entry["Date"]))}</div>
+            </div>
+        """)
+        prev_mileage = current
+    parts.append('<div class="seg end"></div>')
+
+    return f"""
+    <style>
+      body {{ margin: 0; font-family: "Source Sans Pro", Arial, sans-serif; background: transparent; }}
+      .scroller {{ overflow-x: auto; padding-bottom: 6px; }}
+      .row {{
+        display: flex; align-items: center; height: 104px; min-width: max-content;
+        background: #ffffff; border: 1px solid #cfcfcf; border-radius: 6px;
+        padding: 0 10px; box-sizing: border-box;
+      }}
+      .vlabel {{
+        flex: 0 0 140px; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center;
+      }}
+      .vno {{ font-weight: 700; font-size: 15px; color: #111; }}
+      .rider {{
+        font-weight: 600; font-size: 12px; color: #555; margin-top: 3px;
+        max-width: 130px; word-break: break-word; line-height: 1.2;
+      }}
+      .track {{ display: flex; align-items: center; }}
+      .seg {{ height: 6px; background: #000; }}
+      .seg.short {{ flex: 0 0 24px; }}
+      .seg.end {{ flex: 0 0 40px; }}
+      .col {{ flex: 0 0 104px; text-align: center; }}
+      .cap {{ font-size: 13px; color: #111; margin-bottom: 3px; white-space: nowrap; }}
+      .box {{
+        height: 38px; line-height: 38px; font-weight: 700; font-size: 18px;
+        box-sizing: border-box; color: #111;
+      }}
+      .box.serviced {{ background: #ed7d31; }}
+      .box.weekly {{ background: #ffffff; border: 2px solid #f2b705; }}
+      .diff {{ flex: 0 0 80px; position: relative; height: 6px; background: #000; }}
+      .diff span {{
+        position: absolute; left: -10px; right: -10px; bottom: 9px;
+        text-align: center; color: #e00000; font-weight: 700; font-size: 13px; white-space: nowrap;
+      }}
+      .dt {{ font-size: 12px; font-weight: 700; color: #111; margin-top: 3px; }}
+    </style>
+    <div class="scroller">
+      <div class="row">
+        <div class="vlabel">
+          <div class="vno">{html.escape(str(vehicle_no))}</div>
+          {rider_html}
+        </div>
+        <div class="track">
+          {''.join(parts)}
+        </div>
+      </div>
+    </div>
+    """
+
+
 # -------------------------------------------------------------------------
 # Serviced Report / Chemical Additive Report helpers
 # -------------------------------------------------------------------------
@@ -2324,6 +2413,19 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                     .rename(columns={"Mileage (KM)": "Mileage"})
                 )
                 st.dataframe(entries_view, use_container_width=True, hide_index=True)
+
+            # Mileage line for the selected vehicle: every Weekly Mileage and
+            # Serviced Mileage entry on one line, in date order (oldest first).
+            st.markdown(f"**📍 Mileage Line — {ml_vehicle_no}**")
+            timeline_html = build_mileage_timeline_html(mileage_log_df, ml_vehicle_no)
+            if not timeline_html:
+                st.info("No Weekly or Serviced mileage entries recorded for this vehicle yet.")
+            else:
+                components.html(timeline_html, height=150, scrolling=False)
+                st.caption(
+                    "Shows every Weekly Mileage (white) and Serviced Mileage (orange) entry in date order, "
+                    "oldest on the left. The red figure between two boxes is the KM run between those entries."
+                )
 
         # ---------------------------------------------------------------
         # SERVICE DETAILS / CHEMICAL ADDITIVE DETAILS
