@@ -51,7 +51,7 @@ MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type"
 MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage", "Diesel System Tune - Up Changed"]
 
 # Oil Type options and how many KM after a service the next one is due.
-OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500, "Mac 4T plus 20W - 40:2500"}
+OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500, "Mac 4T plus 20W - 40":2500}
 OIL_TYPES = list(OIL_SERVICE_INTERVALS.keys())
 
 # Chemical additive: how many KM after an Additive Changed Mileage entry the
