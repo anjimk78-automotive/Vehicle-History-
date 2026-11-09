@@ -48,7 +48,10 @@ DEFAULT_MILEAGE_LOG_SHEET_NAME = "MileageLog"
 # Storage columns for the Mileage Inspection sheet: one row per entry.
 # "Oil Type" is appended last so existing rows/columns never shift position.
 MILEAGE_LOG_COLUMNS = ["Timestamp", "Vehicle No", "Vehicle Type", "Mileage Type", "Date", "Mileage (KM)", "User", "Oil Type"]
-MILEAGE_TYPES = ["Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage", "Diesel System Tune - Up Changed"]
+MILEAGE_TYPES = [
+    "Weekly Mileage", "Serviced Mileage", "Additive Changed Mileage",
+    "Diesel System Tune - Up Changed", "Brake Piston Cleaning Mileage",
+]
 
 # Oil Type options and how many KM after a service the next one is due.
 OIL_SERVICE_INTERVALS = {"Castrol": 5000, "Bajaj Genuine": 2500, "Yamaha Genuine":2000, "Caltex Havoline 20W 50":2500, "Mac 4T plus 20W - 40":2500}
@@ -62,6 +65,15 @@ ADDITIVE_INTERVAL_KM = 5000
 # Tune - Up Changed" entry the next tune-up is due. Change this one number to
 # adjust it.
 DIESEL_TUNEUP_INTERVAL_KM = 25000
+
+# Brake Piston Cleaning (Lorry and Car/Cab): the next cleaning is due after
+# this many KM OR this many months from the last cleaning, whichever comes
+# first. Change these numbers to adjust it.
+BRAKE_PISTON_INTERVAL_KM = 10000
+BRAKE_PISTON_INTERVAL_MONTHS = 5
+# The Next Brake Piston Cleaning box also turns red when the 5-month date is
+# this many days away (or already passed).
+BRAKE_DUE_WARN_DAYS = 30
 
 # Lorries that service every 5000 km. Every other Lorry services every 6000 km.
 # Vehicle Nos are compared ignoring spaces and letter case.
@@ -1001,9 +1013,10 @@ def next_additive_interval(log_df, vehicle_no):
     return ADDITIVE_INTERVAL_KM, "Additive"
 
 
-# The two "kinds" of mileage line / report: Service Details (Serviced
-# Mileage) and Chemical Additive Details (Additive Changed Mileage). Both use
-# the same layout; only the mileage type, captions and interval differ.
+# The "kinds" of mileage line / report: Service Details (Serviced Mileage),
+# Chemical Additive Details (Additive Changed Mileage), Diesel System Tune -
+# Up and Brake Piston Cleaning. All use the same layout; only the mileage
+# type, captions and interval differ.
 SERVICE_KIND = {
     "key": "service",
     "mileage_type": "Serviced Mileage",
@@ -1042,14 +1055,64 @@ DIESEL_KIND = {
     "interval": next_diesel_interval,
 }
 
+
+def next_brake_interval(log_df, vehicle_no):
+    """Returns (km_interval, label) for the next Brake Piston Cleaning.
+    A single fixed interval (BRAKE_PISTON_INTERVAL_KM) is used. The
+    5-month limit is handled separately (see due_date_info)."""
+    return BRAKE_PISTON_INTERVAL_KM, "Brake Piston"
+
+
+BRAKE_KIND = {
+    "key": "brake",
+    "mileage_type": "Brake Piston Cleaning Mileage",
+    "last_caption": "Last Brake Piston Cleaning",
+    "next_caption": "Next Brake Piston Cleaning",
+    "report_title": "Brake Piston Cleaning Report",
+    "interval": next_brake_interval,
+}
+
 # Which Vehicle Types each kind applies to (Service: all, Chemical Additive:
-# Lorry and Car/Cab, Diesel System Tune - Up: Lorry only) and its interval.
+# Lorry and Car/Cab, Diesel System Tune - Up: Lorry only, Brake Piston
+# Cleaning: Lorry and Car/Cab) and its interval.
 SERVICE_KIND["applies"] = lambda t: True
 ADDITIVE_KIND["applies"] = is_fixed_interval_type
 DIESEL_KIND["applies"] = is_lorry_type
+BRAKE_KIND["applies"] = is_fixed_interval_type
 SERVICE_KIND["interval_km"] = None
 ADDITIVE_KIND["interval_km"] = ADDITIVE_INTERVAL_KM
 DIESEL_KIND["interval_km"] = DIESEL_TUNEUP_INTERVAL_KM
+BRAKE_KIND["interval_km"] = BRAKE_PISTON_INTERVAL_KM
+# Optional second limit: the next one is also due this many months after the
+# last one (only Brake Piston Cleaning uses it).
+SERVICE_KIND["interval_months"] = None
+ADDITIVE_KIND["interval_months"] = None
+DIESEL_KIND["interval_months"] = None
+BRAKE_KIND["interval_months"] = BRAKE_PISTON_INTERVAL_MONTHS
+
+
+def due_date_info(log_df, vehicle_no, kind):
+    """For kinds that also have a months limit (Brake Piston Cleaning):
+    returns (due_date, days_left) where due_date is the last cleaning date
+    plus the months limit. Returns None for other kinds or when there is no
+    usable last entry."""
+    months = kind.get("interval_months")
+    if not months:
+        return None
+    last = latest_mileage_entry(log_df, vehicle_no, kind["mileage_type"])
+    if not last:
+        return None
+    last_date = pd.to_datetime(last[1], errors="coerce")
+    if pd.isna(last_date):
+        return None
+    due = (last_date + pd.DateOffset(months=months)).date()
+    return due, (due - date.today()).days
+
+
+def is_due_by_date(log_df, vehicle_no, kind):
+    """True when the months limit has passed or is within the warning window."""
+    info = due_date_info(log_df, vehicle_no, kind)
+    return bool(info) and info[1] <= BRAKE_DUE_WARN_DAYS
 
 
 def _fmt_mileage(value):
@@ -1057,6 +1120,16 @@ def _fmt_mileage(value):
     if str(value).strip() == "":
         return "—"
     return f"{int(num)}" if num == int(num) else f"{num}"
+
+
+def urgency_km(log_df, vehicle_no, kind):
+    """The figure used to order vehicles: KM left to the next one, smallest
+    first. For Brake Piston Cleaning, a vehicle whose 5-month date has
+    passed (or is close) is treated as due now. None = can't be worked out."""
+    km = km_to_next_service(log_df, vehicle_no, kind)
+    if is_due_by_date(log_df, vehicle_no, kind):
+        return min(km, 0) if km is not None else 0
+    return km
 
 
 def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
@@ -1068,24 +1141,14 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
     last_type = kind["mileage_type"]
     interval_fn = kind["interval"]
 
-    def _km_to_next_service(v):
-        """Next Service mileage minus latest Weekly Mileage, or None when it
-        can't be worked out (no serviced/weekly entry or no oil type)."""
-        s = latest_mileage_entry(log_df, v, last_type)
-        w = latest_mileage_entry(log_df, v, "Weekly Mileage")
-        iv, _ = interval_fn(log_df, v)
-        if s and w and iv:
-            return (to_number(s[0]) + iv) - to_number(w[0])
-        return None
-
     # Lines are ordered by km left to the next service, smallest first
     # (overdue vehicles with negative values come first); vehicles whose
     # value can't be calculated go last, in Vehicle No order.
     vehicles = sorted(
         vehicles,
         key=lambda v: (
-            _km_to_next_service(v) is None,
-            _km_to_next_service(v) if _km_to_next_service(v) is not None else 0,
+            urgency_km(log_df, v, kind) is None,
+            urgency_km(log_df, v, kind) if urgency_km(log_df, v, kind) is not None else 0,
             v,
         ),
     )
@@ -1107,9 +1170,13 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
         # Next service = last serviced mileage + the interval for the oil
         # used at that service (Castrol 5000 km, Bajaj Genuine 2500 km).
         interval, interval_label = interval_fn(log_df, vno)
+        due_info = due_date_info(log_df, vno, kind)
         if serviced and interval:
             n_val = _fmt_mileage(to_number(serviced[0]) + interval)
-            n_note = f"{html.escape(interval_label)} (+{interval} km)"
+            if due_info:
+                n_note = f"or by {html.escape(due_info[0].isoformat())}"
+            else:
+                n_note = f"{html.escape(interval_label)} (+{interval} km)"
         else:
             n_val = "—"
             n_note = "Oil type not set" if serviced else "&nbsp;"
@@ -1133,10 +1200,14 @@ def build_mileage_lines_html(log_df, vehicles, red_below_km=None, kind=None):
             remaining_html = '<div class="seg mid"></div>'
 
         # Only when asked for (the Serviced Report): colour the Next Service
-        # box red once the KM left to the next service is below the limit.
+        # box red once the KM left to the next service is below the limit
+        # (or, for Brake Piston Cleaning, the 5-month date is near/passed).
         next_box_class = "nextsvc"
-        if red_below_km is not None and serviced and interval and weekly and remaining_val < red_below_km:
-            next_box_class = "nextsvc low"
+        if red_below_km is not None:
+            km_low = bool(serviced and interval and weekly and remaining_val < red_below_km)
+            date_low = bool(due_info and due_info[1] <= BRAKE_DUE_WARN_DAYS)
+            if km_low or date_low:
+                next_box_class = "nextsvc low"
 
         rows_html.append(f"""
         <div class="row">
@@ -1352,14 +1423,15 @@ def build_serviced_report_rows(log_df, vehicle_types=None, kind=None):
             continue
         if vehicle_types and vtype not in vehicle_types:
             continue
-        # Chemical additive: Lorry and Car/Cab only. Diesel tune-up: Lorry only.
+        # Chemical additive: Lorry and Car/Cab only. Diesel tune-up: Lorry
+        # only. Brake piston cleaning: Lorry and Car/Cab only.
         if not (kind or SERVICE_KIND)["applies"](vtype):
             continue
         rows.append({
             "Vehicle No": vno,
             "Vehicle Type": vtype,
             "Rider": info.get("Rider", ""),
-            "km": km_to_next_service(log_df, vno, kind),
+            "km": urgency_km(log_df, vno, kind or SERVICE_KIND),
         })
     rows.sort(key=lambda r: (
         vehicle_type_group_rank(r["Vehicle Type"]),
@@ -1378,6 +1450,7 @@ def serviced_line_data(log_df, vehicle_no, kind=None):
     serviced = latest_mileage_entry(log_df, vehicle_no, kind["mileage_type"])
     weekly = latest_mileage_entry(log_df, vehicle_no, "Weekly Mileage")
     interval, interval_label = kind["interval"](log_df, vehicle_no)
+    due_info = due_date_info(log_df, vehicle_no, kind)
 
     data = {
         "s_val": _fmt_mileage(serviced[0]) if serviced else "—",
@@ -1387,10 +1460,14 @@ def serviced_line_data(log_df, vehicle_no, kind=None):
         "diff": None,
         "remaining": None,
         "remaining_km": None,
+        "date_low": bool(due_info and due_info[1] <= BRAKE_DUE_WARN_DAYS),
     }
     if serviced and interval:
         data["n_val"] = _fmt_mileage(to_number(serviced[0]) + interval)
-        data["n_note"] = f"{interval_label} (+{interval} km)"
+        if due_info:
+            data["n_note"] = f"or by {due_info[0].isoformat()}"
+        else:
+            data["n_note"] = f"{interval_label} (+{interval} km)"
     else:
         data["n_val"] = "—"
         data["n_note"] = "Oil type not set" if serviced else ""
@@ -1482,7 +1559,7 @@ def build_serviced_report_pdf(rows, log_df, kind=None):
             bw = col_w - 2 * mm
             c.setFillColor(black)
             c.setFont("Helvetica", 8)
-            c.drawCentredString(cx, cy + box_h / 2 + 2 * mm, caption)
+            c.drawCentredString(cx, cy + box_h / 2 + 2 * mm, fit_text(caption, "Helvetica", 8, col_w + 8 * mm))
             c.setFillColor(fill)
             if stroke is not None:
                 c.setStrokeColor(stroke)
@@ -1504,8 +1581,10 @@ def build_serviced_report_pdf(rows, log_df, kind=None):
                 c.drawCentredString(x_left + seg_w / 2, cy + 2 * mm, text)
 
         # The Next Service box turns red when 500 km or fewer are left
-        # (below 501 km), including vehicles that are already overdue.
-        low_km = d["remaining_km"] is not None and d["remaining_km"] < 501
+        # (below 501 km), including vehicles that are already overdue. For
+        # Brake Piston Cleaning it also turns red when the 5-month date is
+        # near or passed.
+        low_km = (d["remaining_km"] is not None and d["remaining_km"] < 501) or d["date_low"]
         next_fill = red if low_km else colors.HexColor("#1e6fd9")
 
         x = x_track + 3 * mm
@@ -1544,7 +1623,8 @@ def build_serviced_report_pdf(rows, log_df, kind=None):
         draw_row(y - row_h, r)
         y -= row_h + gap
 
-    if y - 13 * mm < margin:
+    footer_extra = 4 if kind.get("interval_months") else 0
+    if y - (13 + footer_extra * 1) * mm < margin:
         y = new_page_top()
     c.setFont("Helvetica", 7.5)
     c.setFillColor(grey)
@@ -1560,6 +1640,12 @@ def build_serviced_report_pdf(rows, log_df, kind=None):
         left, y - 10 * mm,
         f"A red {kind['next_caption']} box means 500 km or fewer are left.",
     )
+    if kind.get("interval_months"):
+        c.drawString(
+            left, y - 13.5 * mm,
+            f"The next one is due after {kind['interval_km']} km or {kind['interval_months']} months from the last one, whichever comes first "
+            f"(date shown under the box; red when it is within {BRAKE_DUE_WARN_DAYS} days or passed).",
+        )
     c.save()
     return buffer.getvalue()
 
@@ -1622,7 +1708,7 @@ with st.sidebar:
     SECTIONS = [
         "Record Entering", "View", "Vehicle Details", "Analytics",
         "Mileage Inspection", "Service Details", "Chemical Additive Details",
-        "Diesel System Tune - Up",
+        "Diesel System Tune - Up", "Brake Piston Cleaning",
     ]
     if st.session_state.get("phase") not in SECTIONS:
         st.session_state["phase"] = SECTIONS[0]
@@ -2284,10 +2370,14 @@ elif phase == "Analytics":
                     st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
 # =========================================================================
-# PHASES 5-7 — MILEAGE INSPECTION (Entering), SERVICE DETAILS and
-# CHEMICAL ADDITIVE DETAILS (Mileage Lines + report each)
+# PHASES 5-9 — MILEAGE INSPECTION (Entering), SERVICE DETAILS, CHEMICAL
+# ADDITIVE DETAILS, DIESEL SYSTEM TUNE - UP and BRAKE PISTON CLEANING
+# (Mileage Lines + report each)
 # =========================================================================
-elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Details", "Diesel System Tune - Up"):
+elif phase in (
+    "Mileage Inspection", "Service Details", "Chemical Additive Details",
+    "Diesel System Tune - Up", "Brake Piston Cleaning",
+):
     st.markdown(f"#### 🛣️ {phase}")
 
     if phase == "Mileage Inspection":
@@ -2299,11 +2389,14 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
 
     vehicle_types_available = sorted({t for t in vehicle_map.values() if t and not is_excluded_vehicle_type(t)})
     # Chemical additive applies to Lorry and Car/Cab only; Diesel System
-    # Tune - Up applies to Lorry only.
+    # Tune - Up applies to Lorry only; Brake Piston Cleaning applies to
+    # Lorry and Car/Cab only.
     if phase == "Chemical Additive Details":
         vehicle_types_available = [t for t in vehicle_types_available if ADDITIVE_KIND["applies"](t)]
     elif phase == "Diesel System Tune - Up":
         vehicle_types_available = [t for t in vehicle_types_available if DIESEL_KIND["applies"](t)]
+    elif phase == "Brake Piston Cleaning":
+        vehicle_types_available = [t for t in vehicle_types_available if BRAKE_KIND["applies"](t)]
 
     if not vehicle_map:
         st.info(
@@ -2332,11 +2425,13 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
             ml_vehicle_options = sorted(v for v, t in vehicle_map.items() if t == ml_vehicle_type)
             ml_vehicle_no = st.selectbox("Vehicle No *", ml_vehicle_options, key="mil_vehicle_no")
             # Additive Changed Mileage is only offered for Lorry and Car/Cab;
-            # Diesel System Tune - Up Changed only for Lorry.
+            # Diesel System Tune - Up Changed only for Lorry; Brake Piston
+            # Cleaning Mileage only for Lorry and Car/Cab.
             ml_mileage_type_options = [
                 m for m in MILEAGE_TYPES
                 if (m != "Additive Changed Mileage" or ADDITIVE_KIND["applies"](ml_vehicle_type))
                 and (m != "Diesel System Tune - Up Changed" or DIESEL_KIND["applies"](ml_vehicle_type))
+                and (m != "Brake Piston Cleaning Mileage" or BRAKE_KIND["applies"](ml_vehicle_type))
             ]
             ml_mileage_type = st.selectbox("Mileage Type *", ml_mileage_type_options, key="mil_mileage_type")
             # Oil Type only applies to a service, so it appears when
@@ -2428,13 +2523,15 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                 )
 
         # ---------------------------------------------------------------
-        # SERVICE DETAILS / CHEMICAL ADDITIVE DETAILS
+        # SERVICE DETAILS / CHEMICAL ADDITIVE DETAILS / DIESEL SYSTEM
+        # TUNE - UP / BRAKE PISTON CLEANING
         # ---------------------------------------------------------------
         else:
             kind = {
                 "Service Details": SERVICE_KIND,
                 "Chemical Additive Details": ADDITIVE_KIND,
                 "Diesel System Tune - Up": DIESEL_KIND,
+                "Brake Piston Cleaning": BRAKE_KIND,
             }[phase]
             sub_options = ["📍 Mileage Lines", f"📑 {kind['report_title']}"]
             detail_subphase = st.radio(
@@ -2482,9 +2579,17 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                             f"{kind['mileage_type'].lower()} mileage + {kind['interval_km']} km. "
                             f"A red {kind['next_caption']} box means 500 km or fewer are left."
                         )
+                        if kind.get("interval_months"):
+                            st.caption(
+                                f"{kind['next_caption']} is due after {kind['interval_km']} km or "
+                                f"{kind['interval_months']} months from the last one, whichever comes first. "
+                                f"The date shown under the box is the {kind['interval_months']}-month date; the box also "
+                                f"turns red when that date is within {BRAKE_DUE_WARN_DAYS} days or has passed."
+                            )
 
             # -----------------------------------------------------------
-            # SERVICED REPORT / CHEMICAL ADDITIVE REPORT
+            # SERVICED REPORT / CHEMICAL ADDITIVE REPORT / DIESEL REPORT /
+            # BRAKE PISTON CLEANING REPORT
             # -----------------------------------------------------------
             else:
                 report_type_options = sorted(
@@ -2539,12 +2644,20 @@ elif phase in ("Mileage Inspection", "Service Details", "Chemical Additive Detai
                             f"with the fewest KM left first within each group. A red {kind['next_caption']} box means "
                             "500 km or fewer are left."
                         )
+                        if kind.get("interval_months"):
+                            st.caption(
+                                f"{kind['next_caption']} is due after {kind['interval_km']} km or "
+                                f"{kind['interval_months']} months from the last one, whichever comes first. "
+                                f"The date shown under the box is the {kind['interval_months']}-month date; the box also "
+                                f"turns red when that date is within {BRAKE_DUE_WARN_DAYS} days or has passed."
+                            )
 
                     if _REPORTLAB_AVAILABLE:
                         pdf_prefix = {
                             "service": "serviced_report",
                             "additive": "chemical_additive_report",
                             "diesel": "diesel_system_tune_up_report",
+                            "brake": "brake_piston_cleaning_report",
                         }[kind["key"]]
                         st.download_button(
                             f"⬇️ Download {kind['report_title']} as PDF",
