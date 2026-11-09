@@ -73,7 +73,7 @@ BRAKE_PISTON_INTERVAL_KM = 10000
 BRAKE_PISTON_INTERVAL_MONTHS = 5
 # The Next Brake Piston Cleaning box also turns red when the 5-month date is
 # this many days away (or already passed).
-BRAKE_DUE_WARN_DAYS = 30
+BRAKE_DUE_WARN_DAYS = 14
 
 # Lorries that service every 5000 km. Every other Lorry services every 6000 km.
 # Vehicle Nos are compared ignoring spaces and letter case.
