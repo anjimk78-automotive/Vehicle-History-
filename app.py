@@ -69,7 +69,8 @@ DIESEL_TUNEUP_INTERVAL_KM = 25000
 # Brake Piston Cleaning (Lorry and Car/Cab): the next cleaning is due after
 # this many KM OR this many months from the last cleaning, whichever comes
 # first. Change these numbers to adjust it.
-BRAKE_PISTON_INTERVAL_KM = 10000
+BRAKE_PISTON_INTERVAL_KM_LORRY = 10000
+BRAKE_PISTON_INTERVAL_KM_CAR = 5000  # Car/Cab
 BRAKE_PISTON_INTERVAL_MONTHS = 5
 # The Next Brake Piston Cleaning box also turns red when the 5-month date is
 # this many days away (or already passed).
@@ -1058,9 +1059,12 @@ DIESEL_KIND = {
 
 def next_brake_interval(log_df, vehicle_no):
     """Returns (km_interval, label) for the next Brake Piston Cleaning.
-    A single fixed interval (BRAKE_PISTON_INTERVAL_KM) is used. The
-    5-month limit is handled separately (see due_date_info)."""
-    return BRAKE_PISTON_INTERVAL_KM, "Brake Piston"
+    Lorry -> BRAKE_PISTON_INTERVAL_KM_LORRY, Car/Cab ->
+    BRAKE_PISTON_INTERVAL_KM_CAR. The 5-month limit is handled separately
+    (see due_date_info)."""
+    if is_lorry_type(vehicle_map.get(vehicle_no, "")):
+        return BRAKE_PISTON_INTERVAL_KM_LORRY, "Brake Piston"
+    return BRAKE_PISTON_INTERVAL_KM_CAR, "Brake Piston"
 
 
 BRAKE_KIND = {
@@ -1082,7 +1086,7 @@ BRAKE_KIND["applies"] = is_fixed_interval_type
 SERVICE_KIND["interval_km"] = None
 ADDITIVE_KIND["interval_km"] = ADDITIVE_INTERVAL_KM
 DIESEL_KIND["interval_km"] = DIESEL_TUNEUP_INTERVAL_KM
-BRAKE_KIND["interval_km"] = BRAKE_PISTON_INTERVAL_KM
+BRAKE_KIND["interval_km"] = f"{BRAKE_PISTON_INTERVAL_KM_LORRY} (Lorry) / {BRAKE_PISTON_INTERVAL_KM_CAR} (Car/Cab)"
 # Optional second limit: the next one is also due this many months after the
 # last one (only Brake Piston Cleaning uses it).
 SERVICE_KIND["interval_months"] = None
